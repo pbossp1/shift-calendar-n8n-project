@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ปฏิทินเวร</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.8/index.global.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: 'Sarabun', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 36px;
+      margin: 0 0 10px 0;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .header p {
+      font-size: 16px;
+      opacity: 0.9;
+      margin: 0;
+    }
+
+    #calendar {
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .fc {
+      font-size: 14px;
+    }
+
+    .fc-toolbar-title {
+      font-size: 28px !important;
+      font-weight: bold;
+      color: #333;
+    }
+
+    .fc-toolbar {
+      position: relative;
+      margin-bottom: 20px !important;
+    }
+
+    .fc-toolbar-chunk:nth-child(2) {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .fc-button {
+      background-color: #667eea !important;
+      border-color: #667eea !important;
+      padding: 8px 16px !important;
+      font-weight: 500 !important;
+    }
+
+    .fc-button:hover {
+      background-color: #5568d3 !important;
+      border-color: #5568d3 !important;
+    }
+
+    .fc-day-today {
+      background-color: #fff3e0 !important;
+    }
+
+    .fc-event {
+      cursor: pointer;
+      border: none !important;
+      font-weight: 500;
+      padding: 2px 4px;
+    }
+
+    .fc-event-title {
+      text-align: center;
+    }
+
+    .fc-daygrid-event {
+      text-align: center;
+    }
+
+    .fc-daygrid-event-dot {
+      display: none;
+    }
+
+    .summary-btn-container {
+      text-align: center;
+      margin-top: 20px;
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .summary-btn-container button {
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      transition: all 0.3s;
+    }
+
+    #summaryBtn {
+      background: white;
+      color: #667eea;
+    }
+
+    #resetMonthBtn {
+      background: #ff5252;
+      color: white;
+    }
+
+    .summary-btn-container button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      backdrop-filter: blur(4px);
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 10px 50px rgba(0, 0, 0, 0.3);
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .modal-content h3 {
+      margin: 0 0 25px 0;
+      color: #333;
+      font-size: 24px;
+      text-align: center;
+    }
+
+    .modal-content p {
+      margin: 20px 0 10px 0;
+      font-weight: 600;
+      color: #555;
+      font-size: 15px;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn-group button {
+      flex: 1;
+      min-width: 80px;
+      padding: 12px 20px;
+      border: 2px solid #e0e0e0;
+      background: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .btn-group button:hover {
+      border-color: #667eea;
+      background: #f5f7ff;
+      transform: translateY(-1px);
+    }
+
+    .btn-group button.selected {
+      border-color: #667eea;
+      background: #667eea;
+      color: white;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .modal-actions {
+      margin-top: 30px;
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .modal-actions button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    #cancelBtn {
+      background: #f5f5f5;
+      color: #666;
+    }
+
+    #cancelBtn:hover {
+      background: #e0e0e0;
+    }
+
+    #confirmBtn {
+      background: #667eea;
+      color: white;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    #confirmBtn:hover {
+      background: #5568d3;
+      transform: translateY(-1px);
+    }
+
+    #summaryList {
+      list-style: none;
+      padding: 0;
+      margin: 20px 0;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    #summaryList li {
+      padding: 12px 15px;
+      margin-bottom: 8px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+      font-size: 15px;
+    }
+
+    #closeSummary {
+      padding: 12px 24px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    #closeSummary:hover {
+      background: #5568d3;
+      transform: translateY(-1px);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📅 ปฏิทินเวร</h1>
+      <p>คลิกที่วันเพื่อเพิ่มเวร • คลิกที่เวรเพื่อลบ</p>
+    </div>
+
+    <div id="calendar"></div>
+
+    <div class="summary-btn-container">
+      <button id="summaryBtn">📊 สรุปเวรทั้งหมด</button>
+      <button id="resetMonthBtn">♻️ รีเซ็ตเดือนนี้</button>
+      <button id="sendToN8nBtn">🚀 ส่งเวรเดือนนี้</button>
+    </div>
+  </div>
+
+  <div id="shiftModal" class="modal">
+    <div class="modal-content">
+      <h3>✨ เลือกเวร</h3>
+
+      <p>🏥 ตึก</p>
+      <div id="buildingBtns" class="btn-group">
+        <button data-building="C">ตึก C</button>
+        <button data-building="N">ตึก N</button>
+      </div>
+
+      <p>⏰ เวร</p>
+      <div id="shiftBtns" class="btn-group">
+        <button data-shift="7">7</button>
+        <button data-shift="12">12</button>
+        <button data-shift="24">24</button>
+        <button data-shift="PL">PL</button>
+        <button data-shift="VL">VL</button>
+      </div>
+
+      <div class="modal-actions">
+        <button id="cancelBtn">ยกเลิก</button>
+        <button id="confirmBtn">✓ ตกลง</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="summaryModal" class="modal">
+    <div class="modal-content">
+      <h3>📋 สรุปเวรทั้งหมด</h3>
+      <ul id="summaryList"></ul>
+      <div style="text-align:right;">
+        <button id="closeSummary">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "shift-calendar-events";
+
+    function saveEvents(calendar) {
+      const events = calendar.getEvents().map(ev => ({
+        title: ev.title,
+        start: ev.startStr,
+        allDay: ev.allDay,
+        backgroundColor: ev.backgroundColor
+      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    }
+
+    function loadEvents(calendar) {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+
+      try {
+        const events = JSON.parse(raw);
+        events.forEach(ev => calendar.addEvent(ev));
+      } catch (e) {
+        console.error("Load events failed", e);
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      const calendarEl = document.getElementById("calendar");
+      const modal = document.getElementById("shiftModal");
+      const buildingBtns = document.getElementById("buildingBtns");
+      const shiftBtns = document.getElementById("shiftBtns");
+      const cancelBtn = document.getElementById("cancelBtn");
+      const confirmBtn = document.getElementById("confirmBtn");
+      const summaryBtn = document.getElementById("summaryBtn");
+      const summaryModal = document.getElementById("summaryModal");
+      const summaryList = document.getElementById("summaryList");
+      const closeSummary = document.getElementById("closeSummary");
+      const resetMonthBtn = document.getElementById("resetMonthBtn");
+
+      let selectedDate = null;
+      let selectedBuilding = null;
+      let selectedShift = null;
+
+      const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: "dayGridMonth",
+        locale: "th",
+        height: "auto",
+        headerToolbar: {
+          left: "",
+          center: "title",
+          right: "prev,next today"
+        },
+        buttonText: {
+          today: "วันนี้"
+        },
+        firstDay: 0,
+        selectable: true,
+        dateClick: function (info) {
+          selectedDate = info.dateStr;
+          selectedBuilding = null;
+          selectedShift = null;
+
+          document.querySelectorAll('.btn-group button').forEach(btn => {
+            btn.classList.remove('selected');
+          });
+
+          modal.classList.add('active');
+        },
+        eventClick: function (info) {
+          const result = window.confirm('ต้องการลบเวร "' + info.event.title + '" หรือไม่?');
+          if (result) {
+            info.event.remove();
+            saveEvents(calendar);
+          }
+        }
+      });
+
+      buildingBtns.addEventListener('click', function (e) {
+        if (e.target.dataset.building) {
+          buildingBtns.querySelectorAll('button').forEach(btn => {
+            btn.classList.remove('selected');
+          });
+          e.target.classList.add('selected');
+          selectedBuilding = e.target.dataset.building;
+        }
+      });
+
+      shiftBtns.addEventListener('click', function (e) {
+        if (e.target.dataset.shift) {
+          shiftBtns.querySelectorAll('button').forEach(btn => {
+            btn.classList.remove('selected');
+          });
+          e.target.classList.add('selected');
+          selectedShift = e.target.dataset.shift;
+
+          if (selectedShift === 'PL' || selectedShift === 'VL') {
+            buildingBtns.querySelectorAll('button').forEach(btn => {
+              btn.classList.remove('selected');
+            });
+            selectedBuilding = null;
+          }
+        }
+      });
+
+      cancelBtn.addEventListener('click', function () {
+        modal.classList.remove('active');
+      });
+
+      confirmBtn.addEventListener('click', function () {
+        if (selectedShift === 'PL' || selectedShift === 'VL') {
+          if (selectedShift) {
+            calendar.addEvent({
+              title: selectedShift,
+              start: selectedDate,
+              allDay: true,
+              backgroundColor: '#FF9800'
+            });
+            saveEvents(calendar);
+            modal.classList.remove('active');
+          } else {
+            alert('กรุณาเลือกเวร');
+          }
+        } else {
+          if (selectedBuilding && selectedShift) {
+            calendar.addEvent({
+              title: selectedShift + selectedBuilding,
+              start: selectedDate,
+              allDay: true,
+              backgroundColor: selectedBuilding === 'C' ? '#4CAF50' : '#2196F3'
+            });
+            saveEvents(calendar);
+            modal.classList.remove('active');
+          } else {
+            alert('กรุณาเลือกตึกและเวร');
+          }
+        }
+      });
+
+      summaryBtn.addEventListener("click", () => {
+        summaryList.innerHTML = "";
+        const events = calendar.getEvents().sort((a, b) =>
+          new Date(a.start) - new Date(b.start)
+        );
+
+        if (events.length === 0) {
+          summaryList.innerHTML = "<li style='text-align:center; color:#999;'>ยังไม่มีเวร</li>";
+        } else {
+          events.forEach(ev => {
+            const li = document.createElement("li");
+            const date = new Date(ev.start);
+            const thaiDate = date.toLocaleDateString('th-TH', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            });
+            li.textContent = `${thaiDate} — ${ev.title}`;
+            summaryList.appendChild(li);
+          });
+        }
+        summaryModal.classList.add('active');
+      });
+
+      closeSummary.addEventListener("click", () => {
+        summaryModal.classList.remove('active');
+      });
+
+      resetMonthBtn.addEventListener("click", () => {
+        const view = calendar.view;
+        const currentYear = view.currentStart.getFullYear();
+        const currentMonth = view.currentStart.getMonth();
+
+        const confirmReset = confirm(
+          `ต้องการลบเวรทั้งหมดของ ${view.title} ใช่หรือไม่?`
+        );
+        if (!confirmReset) return;
+
+        const events = calendar.getEvents();
+        let deletedCount = 0;
+
+        events.forEach(ev => {
+          const d = new Date(ev.start);
+          if (
+            d.getFullYear() === currentYear &&
+            d.getMonth() === currentMonth
+          ) {
+            ev.remove();
+            deletedCount++;
+          }
+        });
+
+        saveEvents(calendar);
+        alert(`ลบเวรของเดือนนี้เรียบร้อยแล้ว (${deletedCount} เวร)`);
+      });
+
+      modal.addEventListener('click', function (e) {
+        if (e.target === modal) {
+          modal.classList.remove('active');
+        }
+      });
+
+      summaryModal.addEventListener('click', function (e) {
+        if (e.target === summaryModal) {
+          summaryModal.classList.remove('active');
+        }
+      });
+
+      const sendToN8nBtn = document.getElementById("sendToN8nBtn");
+
+      sendToN8nBtn.addEventListener("click", async () => {
+        const view = calendar.view;
+        const year = view.currentStart.getFullYear();
+        const month = view.currentStart.getMonth(); // 0–11
+
+        const events = calendar.getEvents().filter(ev => {
+          const d = new Date(ev.start);
+          return d.getFullYear() === year && d.getMonth() === month;
+        });
+
+        if (events.length === 0) {
+          alert("เดือนนี้ยังไม่มีเวร");
+          return;
+        }
+
+        const payload = {
+          source: "shift-calendar-web",
+          year,
+          month: month + 1,
+          monthLabel: view.title,
+          generatedAt: new Date().toISOString(),
+          shifts: events.map(ev => ({
+            date: ev.startStr,
+            title: ev.title
+          }))
+        };
+
+        console.log("Send to n8n:", payload);
+
+        const N8N_WEBHOOK_URL = "https://YOUR-N8N-WEBHOOK";
+
+        try {
+          const res = await fetch(N8N_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+
+          if (!res.ok) throw new Error("ส่งไม่สำเร็จ");
+          alert("ส่งเวรไป n8n เรียบร้อยแล้ว 🚀");
+
+        } catch (err) {
+          console.error(err);
+          alert("เกิดข้อผิดพลาดในการส่งข้อมูล");
+        }
+      });
+
+
+      loadEvents(calendar);
+      calendar.render();
+    });
+  </script>
+</body>
+
+</html>
