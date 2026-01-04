@@ -570,21 +570,34 @@
           return;
         }
 
+        // แปลง title เป็น code และเพิ่ม days สำหรับ leave
+        const shifts = events.map(ev => {
+          const code = ev.title; // เช่น "7C", "12N", "PL", "VL"
+          const shiftData = {
+            date: ev.startStr,
+            code: code
+          };
+          
+          // ถ้าเป็น PL หรือ VL ให้เพิ่ม days (default = 1)
+          if (code === "PL" || code === "VL") {
+            shiftData.days = 1; // ถ้าต้องการให้ระบุจำนวนวันได้ ต้องเพิ่ม input ใน modal
+          }
+          
+          return shiftData;
+        });
+
         const payload = {
           source: "shift-calendar-web",
           year,
           month: month + 1,
           monthLabel: view.title,
           generatedAt: new Date().toISOString(),
-          shifts: events.map(ev => ({
-            date: ev.startStr,
-            title: ev.title
-          }))
+          shifts: shifts
         };
 
         console.log("Send to n8n:", payload);
 
-        const N8N_WEBHOOK_URL = "https://n8n-fly-cold-breeze-3518.fly.dev/webhook-test/create-shift";
+        const N8N_WEBHOOK_URL = "https://n8n-fly-cold-breeze-3518.fly.dev/webhook/create-shift";
 
         try {
           const res = await fetch(N8N_WEBHOOK_URL, {
@@ -594,11 +607,15 @@
           });
 
           if (!res.ok) throw new Error("ส่งไม่สำเร็จ");
-          alert("ส่งเวรไป n8n เรียบร้อยแล้ว 🚀");
+          
+          const result = await res.json();
+          console.log("n8n response:", result);
+          
+          alert(`ส่งเวรไป n8n เรียบร้อยแล้ว 🚀\n(${shifts.length} เวร)`);
 
         } catch (err) {
           console.error(err);
-          alert("เกิดข้อผิดพลาดในการส่งข้อมูล");
+          alert("เกิดข้อผิดพลาดในการส่งข้อมูล: " + err.message);
         }
       });
 
