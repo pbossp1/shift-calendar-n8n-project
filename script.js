@@ -1,7 +1,13 @@
 // ===== Config =====
+// 1) สร้าง OAuth Client ID ที่ https://console.cloud.google.com/apis/credentials
+//    - Application type: Web application
+//    - Authorized JavaScript origins: เพิ่ม URL ของเว็บคุณ (เช่น https://localhost-two-swart.vercel.app)
+// 2) Enable "Google Calendar API" ใน project เดียวกัน
+// 3) เอา Client ID มาวางด้านล่าง
 const CONFIG = {
   storageKey: "shift-calendar-events",
-  n8nWebhookUrl: "https://n8n-fly-cold-breeze-3518.fly.dev/webhook/create-shift",
+  googleClientId: "PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE",
+  googleCalendarId: "primary", // ใส่ calendar id อื่นได้ ถ้าอยากแยกปฏิทิน
   shiftColors: {
     C: "#4CAF50",
     N: "#2196F3",
@@ -10,6 +16,7 @@ const CONFIG = {
 };
 
 const LEAVE_CODES = ["PL", "VL"];
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
 // ===== Storage =====
 function saveEvents(calendar) {
@@ -32,7 +39,85 @@ function loadEvents(calendar) {
   }
 }
 
-// ===== Shift modal state =====
+// ===== Google OAuth (GIS) =====
+const googleAuth = (() => {
+  let tokenClient = null;
+  let accessToken = null;
+  let pendingResolve = null;
+  let pendingReject = null;
+
+  function init() {
+    if (tokenClient) return;
+    if (!window.google || !google.accounts) {
+      throw new Error("Google Identity Services ยังโหลดไม่เสร็จ ลองอีกครั้ง");
+    }
+    if (CONFIG.googleClientId.startsWith("PASTE_")) {
+      throw new Error("ยังไม่ได้ตั้งค่า Google OAuth Client ID ใน script.js");
+    }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CONFIG.googleClientId,
+      scope: CALENDAR_SCOPE,
+      callback: response => {
+        if (response.error) {
+          pendingReject?.(new Error(response.error));
+        } else {
+          accessToken = response.access_token;
+          pendingResolve?.(accessToken);
+        }
+        pendingResolve = pendingReject = null;
+      }
+    });
+  }
+
+  function getToken({ forcePrompt = false } = {}) {
+    init();
+    if (accessToken && !forcePrompt) return Promise.resolve(accessToken);
+    return new Promise((resolve, reject) => {
+      pendingResolve = resolve;
+      pendingReject = reject;
+      tokenClient.requestAccessToken({ prompt: forcePrompt ? "consent" : "" });
+    });
+  }
+
+  function clearToken() {
+    accessToken = null;
+  }
+
+  return { getToken, clearToken };
+})();
+
+// ===== Google Calendar API =====
+function addDaysISO(dateStr, days) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function createCalendarEvent(token, shift) {
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CONFIG.googleCalendarId)}/events`;
+  const body = {
+    summary: shift.code,
+    start: { date: shift.date },
+    end: { date: addDaysISO(shift.date, shift.days || 1) }
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+// ===== Shift modal =====
 function createShiftPicker(calendar) {
   const modal = document.getElementById("shiftModal");
   const buildingBtns = document.getElementById("buildingBtns");
@@ -180,9 +265,11 @@ function setupResetMonth(calendar) {
   });
 }
 
-// ===== Send to n8n =====
-function setupSendToN8n(calendar) {
-  document.getElementById("sendToN8nBtn").addEventListener("click", async () => {
+// ===== Send to Google Calendar =====
+function setupSendToGoogle(calendar) {
+  const btn = document.getElementById("sendToGoogleBtn");
+
+  btn.addEventListener("click", async () => {
     const view = calendar.view;
     const year = view.currentStart.getFullYear();
     const month = view.currentStart.getMonth();
@@ -197,33 +284,37 @@ function setupSendToN8n(calendar) {
       return;
     }
 
-    const shifts = events.map(ev => {
-      const shift = { date: ev.startStr, code: ev.title };
-      if (LEAVE_CODES.includes(ev.title)) shift.days = 1;
-      return shift;
-    });
+    const shifts = events.map(ev => ({
+      date: ev.startStr,
+      code: ev.title,
+      days: LEAVE_CODES.includes(ev.title) ? 1 : 1
+    }));
 
-    const payload = {
-      source: "shift-calendar-web",
-      year,
-      month: month + 1,
-      monthLabel: view.title,
-      generatedAt: new Date().toISOString(),
-      shifts
-    };
+    const original = btn.textContent;
+    btn.textContent = "กำลังส่ง...";
+    btn.disabled = true;
 
     try {
-      const res = await fetch(CONFIG.n8nWebhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await res.json();
-      alert(`ส่งเวรไป n8n เรียบร้อยแล้ว 🚀\n(${shifts.length} เวร)`);
+      const token = await googleAuth.getToken();
+      const results = await Promise.allSettled(
+        shifts.map(s => createCalendarEvent(token, s))
+      );
+
+      const ok = results.filter(r => r.status === "fulfilled").length;
+      const fail = results.length - ok;
+
+      if (fail === 0) {
+        alert(`ส่งเวรเข้า Google Calendar สำเร็จ ✅\n(${ok} เวร)`);
+      } else {
+        const firstErr = results.find(r => r.status === "rejected")?.reason?.message;
+        alert(`ส่งสำเร็จ ${ok} เวร, ล้มเหลว ${fail} เวร\nสาเหตุ: ${firstErr}`);
+      }
     } catch (err) {
       console.error(err);
-      alert("เกิดข้อผิดพลาดในการส่งข้อมูล: " + err.message);
+      alert("ส่งไม่สำเร็จ: " + err.message);
+    } finally {
+      btn.textContent = original;
+      btn.disabled = false;
     }
   });
 }
@@ -253,7 +344,7 @@ document.addEventListener("DOMContentLoaded", () => {
   Object.assign(picker, createShiftPicker(calendar));
   createSummaryModal(calendar);
   setupResetMonth(calendar);
-  setupSendToN8n(calendar);
+  setupSendToGoogle(calendar);
 
   loadEvents(calendar);
   calendar.render();
