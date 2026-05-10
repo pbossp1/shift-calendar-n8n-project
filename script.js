@@ -6,7 +6,7 @@
 // 3) เอา Client ID มาวางด้านล่าง
 const CONFIG = {
   storageKey: "shift-calendar-events",
-  googleClientId: "PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE",
+  googleClientId: "654720584846-c3917bt3tajh8rp5n1puld8v7m4curkn.apps.googleusercontent.com",
   googleCalendarId: "primary", // ใส่ calendar id อื่นได้ ถ้าอยากแยกปฏิทิน
   shiftColors: {
     C: "#4CAF50",
@@ -51,7 +51,7 @@ const googleAuth = (() => {
     if (!window.google || !google.accounts) {
       throw new Error("Google Identity Services ยังโหลดไม่เสร็จ ลองอีกครั้ง");
     }
-    if (CONFIG.googleClientId.startsWith("PASTE_")) {
+    if (!CONFIG.googleClientId || CONFIG.googleClientId.startsWith("PASTE_")) {
       throw new Error("ยังไม่ได้ตั้งค่า Google OAuth Client ID ใน script.js");
     }
     tokenClient = google.accounts.oauth2.initTokenClient({
