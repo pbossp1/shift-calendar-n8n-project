@@ -6,7 +6,7 @@
 // 3) เอา Client ID มาวางด้านล่าง
 const CONFIG = {
   storageKey: "shift-calendar-events",
-  googleClientId: "654720584846-c3917bt3tajh8rp5n1puld8v7m4curkn.apps.googleusercontent.com",
+  googleClientId: "654720584846-0snt6savjakfaf91h2o6fov8fubmqjoe.apps.googleusercontent.com",
   googleCalendarId: "primary", // ใส่ calendar id อื่นได้ ถ้าอยากแยกปฏิทิน
   shiftColors: {
     C: "#4CAF50",
