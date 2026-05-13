@@ -5,6 +5,8 @@
 body {
   margin: 0;
   padding: 20px;
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
   font-family: 'Sarabun', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   min-height: 100vh;
@@ -59,6 +61,66 @@ body {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+}
+
+@media (max-width: 640px) {
+  body {
+    padding: 12px;
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+
+  .header {
+    margin-bottom: 16px;
+  }
+
+  .header h1 {
+    font-size: 24px;
+  }
+
+  .header p {
+    font-size: 13px;
+  }
+
+  #calendar {
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .fc-toolbar.fc-header-toolbar {
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .fc-toolbar-chunk:nth-child(2) {
+    position: static;
+    transform: none;
+    order: -1;
+  }
+
+  .fc-toolbar-title {
+    font-size: 20px !important;
+  }
+
+  .fc-button {
+    padding: 6px 12px !important;
+    font-size: 13px !important;
+  }
+
+  .fc .fc-daygrid-day-number {
+    font-size: 13px;
+    padding: 4px;
+  }
+
+  .fc-col-header-cell-cushion {
+    font-size: 12px;
+  }
+
+  .summary-btn-container button {
+    padding: 12px 20px;
+    font-size: 14px;
+    width: 100%;
+  }
 }
 
 .fc-button {
