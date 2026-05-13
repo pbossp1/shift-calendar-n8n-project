@@ -7,12 +7,7 @@
 const CONFIG = {
   storageKey: "shift-calendar-events",
   googleClientId: "654720584846-0snt6savjakfaf91h2o6fov8fubmqjoe.apps.googleusercontent.com",
-  googleCalendarId: "mairu2share@gmail.com", // ปฏิทินปลายทาง (ต้อง login ด้วยบัญชีนี้ หรือบัญชีอื่นที่มีสิทธิ์เขียน)
-  shiftColors: {
-    C: "#4CAF50",
-    N: "#2196F3",
-    leave: "#FF9800"
-  }
+  googleCalendarId: "mairu2share@gmail.com" // ปฏิทินปลายทาง (ต้อง login ด้วยบัญชีนี้ หรือบัญชีอื่นที่มีสิทธิ์เขียน)
 };
 
 const LEAVE_CODES = ["PL", "VL"];
@@ -29,6 +24,26 @@ const SHIFT_MAP = {
   "PL":  { type: "leave", label: "PL", colorId: "8" },
   "VL":  { type: "leave", label: "VL", colorId: "8" }
 };
+
+// Google Calendar event color palette
+const COLOR_ID_HEX = {
+  "1":  "#7986CB", // Lavender
+  "2":  "#33B679", // Sage
+  "3":  "#8E24AA", // Grape
+  "4":  "#E67C73", // Flamingo
+  "5":  "#F6BF26", // Banana
+  "6":  "#F4511E", // Tangerine
+  "7":  "#039BE5", // Peacock
+  "8":  "#616161", // Graphite
+  "9":  "#3F51B5", // Blueberry
+  "10": "#0B8043", // Basil
+  "11": "#D50000"  // Tomato
+};
+
+function getShiftColor(code) {
+  const config = SHIFT_MAP[code];
+  return config ? COLOR_ID_HEX[config.colorId] : "#999";
+}
 
 function buildSummary(config) {
   if (config.type !== "work") return config.label;
@@ -225,26 +240,18 @@ function createShiftPicker(calendar) {
       alert("กรุณาเลือกเวร");
       return;
     }
-
-    if (isLeave(selectedShift)) {
-      calendar.addEvent({
-        title: selectedShift,
-        start: selectedDate,
-        allDay: true,
-        backgroundColor: CONFIG.shiftColors.leave
-      });
-    } else {
-      if (!selectedBuilding) {
-        alert("กรุณาเลือกตึก");
-        return;
-      }
-      calendar.addEvent({
-        title: selectedShift + selectedBuilding,
-        start: selectedDate,
-        allDay: true,
-        backgroundColor: CONFIG.shiftColors[selectedBuilding]
-      });
+    if (!isLeave(selectedShift) && !selectedBuilding) {
+      alert("กรุณาเลือกตึก");
+      return;
     }
+
+    const code = isLeave(selectedShift) ? selectedShift : selectedShift + selectedBuilding;
+    calendar.addEvent({
+      title: code,
+      start: selectedDate,
+      allDay: true,
+      backgroundColor: getShiftColor(code)
+    });
 
     saveEvents(calendar);
     close();
@@ -257,13 +264,25 @@ function createShiftPicker(calendar) {
 function createSummaryModal(calendar) {
   const modal = document.getElementById("summaryModal");
   const list = document.getElementById("summaryList");
+  const title = modal.querySelector("h3");
 
   document.getElementById("summaryBtn").addEventListener("click", () => {
     list.innerHTML = "";
-    const events = calendar.getEvents().sort((a, b) => new Date(a.start) - new Date(b.start));
+    const view = calendar.view;
+    const year = view.currentStart.getFullYear();
+    const month = view.currentStart.getMonth();
+
+    if (title) title.textContent = `📋 สรุปเวร ${view.title}`;
+
+    const events = calendar.getEvents()
+      .filter(ev => {
+        const d = new Date(ev.start);
+        return d.getFullYear() === year && d.getMonth() === month;
+      })
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
 
     if (events.length === 0) {
-      list.innerHTML = "<li style='text-align:center; color:#999;'>ยังไม่มีเวร</li>";
+      list.innerHTML = "<li style='text-align:center; color:#999;'>ยังไม่มีเวรเดือนนี้</li>";
     } else {
       events.forEach(ev => {
         const li = document.createElement("li");
