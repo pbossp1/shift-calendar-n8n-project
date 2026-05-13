@@ -7,16 +7,52 @@
 const CONFIG = {
   storageKey: "shift-calendar-events",
   googleClientId: "654720584846-0snt6savjakfaf91h2o6fov8fubmqjoe.apps.googleusercontent.com",
-  googleCalendarId: "primary", // ใส่ calendar id อื่นได้ ถ้าอยากแยกปฏิทิน
-  shiftColors: {
-    C: "#4CAF50",
-    N: "#2196F3",
-    leave: "#FF9800"
-  }
+  googleCalendarId: "mairu2share@gmail.com" // ปฏิทินปลายทาง (ต้อง login ด้วยบัญชีนี้ หรือบัญชีอื่นที่มีสิทธิ์เขียน)
 };
 
 const LEAVE_CODES = ["PL", "VL"];
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const TZ = "+07:00";
+
+const SHIFT_MAP = {
+  "7N":  { type: "work", hours: 7,  start: "07:00", end: "14:00", overnight: false, building: "N", colorId: "2" },
+  "7C":  { type: "work", hours: 7,  start: "07:00", end: "14:00", overnight: false, building: "C", colorId: "4" },
+  "12N": { type: "work", hours: 12, start: "07:00", end: "19:00", overnight: false, building: "N", colorId: "10" },
+  "12C": { type: "work", hours: 12, start: "07:00", end: "19:00", overnight: false, building: "C", colorId: "11" },
+  "24N": { type: "work", hours: 24, start: "07:00", end: "07:00", overnight: true,  building: "N", colorId: "7" },
+  "24C": { type: "work", hours: 24, start: "07:00", end: "07:00", overnight: true,  building: "C", colorId: "7" },
+  "PL":  { type: "leave", label: "PL", colorId: "8" },
+  "VL":  { type: "leave", label: "VL", colorId: "8" }
+};
+
+// Google Calendar event color palette
+const COLOR_ID_HEX = {
+  "1":  "#7986CB", // Lavender
+  "2":  "#33B679", // Sage
+  "3":  "#8E24AA", // Grape
+  "4":  "#E67C73", // Flamingo
+  "5":  "#F6BF26", // Banana
+  "6":  "#F4511E", // Tangerine
+  "7":  "#039BE5", // Peacock
+  "8":  "#616161", // Graphite
+  "9":  "#3F51B5", // Blueberry
+  "10": "#0B8043", // Basil
+  "11": "#D50000"  // Tomato
+};
+
+function getShiftColor(code) {
+  const config = SHIFT_MAP[code];
+  return config ? COLOR_ID_HEX[config.colorId] : "#999";
+}
+
+function buildSummary(config) {
+  if (config.type !== "work") return config.label;
+  const timeText =
+    config.hours === 7  ? "7-14" :
+    config.hours === 12 ? "7-19" :
+    config.hours === 24 ? "7-7"  : "";
+  return `${timeText} Vic ${config.building}`;
+}
 
 // ===== Storage =====
 function saveEvents(calendar) {
@@ -88,18 +124,43 @@ const googleAuth = (() => {
 
 // ===== Google Calendar API =====
 function addDaysISO(dateStr, days) {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() + days);
+  return utc.toISOString().slice(0, 10);
+}
+
+function buildEventBody(shift) {
+  const config = SHIFT_MAP[shift.code];
+  if (!config) throw new Error(`ไม่รู้จักรหัสเวร: "${shift.code}"`);
+
+  if (config.type === "work") {
+    const startDate = shift.date;
+    const endDate = config.overnight ? addDaysISO(startDate, 1) : startDate;
+    return {
+      summary: buildSummary(config),
+      start: { dateTime: `${startDate}T${config.start}:00${TZ}` },
+      end:   { dateTime: `${endDate}T${config.end}:00${TZ}` },
+      colorId: config.colorId,
+      description: `ตึก ${config.building}\nเวร ${config.hours} ชม`
+    };
+  }
+
+  const days = shift.days ?? 1;
+  const startDate = shift.date;
+  const endDate = addDaysISO(startDate, days);
+  return {
+    summary: config.label,
+    start: { date: startDate },
+    end:   { date: endDate },
+    colorId: config.colorId,
+    description: `วันหยุด ${days} วัน`
+  };
 }
 
 async function createCalendarEvent(token, shift) {
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CONFIG.googleCalendarId)}/events`;
-  const body = {
-    summary: shift.code,
-    start: { date: shift.date },
-    end: { date: addDaysISO(shift.date, shift.days || 1) }
-  };
+  const body = buildEventBody(shift);
 
   const res = await fetch(url, {
     method: "POST",
@@ -179,26 +240,18 @@ function createShiftPicker(calendar) {
       alert("กรุณาเลือกเวร");
       return;
     }
-
-    if (isLeave(selectedShift)) {
-      calendar.addEvent({
-        title: selectedShift,
-        start: selectedDate,
-        allDay: true,
-        backgroundColor: CONFIG.shiftColors.leave
-      });
-    } else {
-      if (!selectedBuilding) {
-        alert("กรุณาเลือกตึก");
-        return;
-      }
-      calendar.addEvent({
-        title: selectedShift + selectedBuilding,
-        start: selectedDate,
-        allDay: true,
-        backgroundColor: CONFIG.shiftColors[selectedBuilding]
-      });
+    if (!isLeave(selectedShift) && !selectedBuilding) {
+      alert("กรุณาเลือกตึก");
+      return;
     }
+
+    const code = isLeave(selectedShift) ? selectedShift : selectedShift + selectedBuilding;
+    calendar.addEvent({
+      title: code,
+      start: selectedDate,
+      allDay: true,
+      backgroundColor: getShiftColor(code)
+    });
 
     saveEvents(calendar);
     close();
@@ -211,13 +264,25 @@ function createShiftPicker(calendar) {
 function createSummaryModal(calendar) {
   const modal = document.getElementById("summaryModal");
   const list = document.getElementById("summaryList");
+  const title = modal.querySelector("h3");
 
   document.getElementById("summaryBtn").addEventListener("click", () => {
     list.innerHTML = "";
-    const events = calendar.getEvents().sort((a, b) => new Date(a.start) - new Date(b.start));
+    const view = calendar.view;
+    const year = view.currentStart.getFullYear();
+    const month = view.currentStart.getMonth();
+
+    if (title) title.textContent = `📋 สรุปเวร ${view.title}`;
+
+    const events = calendar.getEvents()
+      .filter(ev => {
+        const d = new Date(ev.start);
+        return d.getFullYear() === year && d.getMonth() === month;
+      })
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
 
     if (events.length === 0) {
-      list.innerHTML = "<li style='text-align:center; color:#999;'>ยังไม่มีเวร</li>";
+      list.innerHTML = "<li style='text-align:center; color:#999;'>ยังไม่มีเวรเดือนนี้</li>";
     } else {
       events.forEach(ev => {
         const li = document.createElement("li");
@@ -286,8 +351,7 @@ function setupSendToGoogle(calendar) {
 
     const shifts = events.map(ev => ({
       date: ev.startStr,
-      code: ev.title,
-      days: LEAVE_CODES.includes(ev.title) ? 1 : 1
+      code: ev.title
     }));
 
     const original = btn.textContent;
