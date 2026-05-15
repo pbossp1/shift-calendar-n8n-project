@@ -23,6 +23,7 @@
       <button id="summaryBtn">📊 สรุปเวรทั้งหมด</button>
       <button id="resetMonthBtn">♻️ รีเซ็ตเดือนนี้</button>
       <button id="sendToGoogleBtn">🚀 ส่งเข้า Google Calendar</button>
+      <button id="settingsBtn">⚙️ ตั้งค่าชนิดเวร</button>
     </div>
   </div>
 
@@ -31,19 +32,10 @@
       <h3>✨ เลือกเวร</h3>
 
       <p>🏥 ตึก</p>
-      <div id="buildingBtns" class="btn-group">
-        <button data-building="C">ตึก C</button>
-        <button data-building="N">ตึก N</button>
-      </div>
+      <div id="buildingBtns" class="btn-group"></div>
 
       <p>⏰ เวร</p>
-      <div id="shiftBtns" class="btn-group">
-        <button data-shift="7">7</button>
-        <button data-shift="12">12</button>
-        <button data-shift="24">24</button>
-        <button data-shift="PL">PL</button>
-        <button data-shift="VL">VL</button>
-      </div>
+      <div id="shiftBtns" class="btn-group"></div>
 
       <div class="modal-actions">
         <button id="cancelBtn">ยกเลิก</button>
@@ -58,6 +50,64 @@
       <ul id="summaryList"></ul>
       <div style="text-align:right;">
         <button id="closeSummary">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal">
+    <div class="modal-content modal-content-wide">
+      <h3>⚙️ จัดการชนิดเวร</h3>
+      <ul id="shiftList"></ul>
+      <div class="modal-actions">
+        <button id="resetShiftsBtn">♻️ คืนค่าเริ่มต้น</button>
+        <button id="addShiftBtn">+ เพิ่มชนิด</button>
+        <button id="closeSettings">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="shiftFormModal" class="modal">
+    <div class="modal-content">
+      <h3 id="shiftFormTitle">เพิ่มชนิดเวร</h3>
+
+      <p>รหัส (เช่น 7N, 12C, PL)</p>
+      <input id="shiftFormCode" type="text" maxlength="8" />
+
+      <p>ประเภท</p>
+      <div id="shiftFormType" class="btn-group">
+        <button data-type="work">ทำงาน</button>
+        <button data-type="leave">ลา</button>
+      </div>
+
+      <div id="workFields">
+        <p>ชั่วโมง</p>
+        <input id="shiftFormHours" type="number" min="1" max="48" />
+
+        <p>เวลาเริ่ม</p>
+        <input id="shiftFormStart" type="time" />
+
+        <p>เวลาจบ</p>
+        <input id="shiftFormEnd" type="time" />
+
+        <p>
+          <label><input id="shiftFormOvernight" type="checkbox" /> ข้ามวัน (จบในวันถัดไป)</label>
+        </p>
+
+        <p>ตึก / สถานที่</p>
+        <input id="shiftFormBuilding" type="text" maxlength="4" />
+      </div>
+
+      <div id="leaveFields" style="display:none;">
+        <p>ชื่อแสดง</p>
+        <input id="shiftFormLabel" type="text" maxlength="20" />
+      </div>
+
+      <p>สี (Google Calendar palette)</p>
+      <div id="shiftFormColor" class="color-grid"></div>
+
+      <div class="modal-actions">
+        <button id="shiftFormCancel">ยกเลิก</button>
+        <button id="shiftFormSave">✓ บันทึก</button>
       </div>
     </div>
   </div>

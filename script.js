@@ -1,20 +1,15 @@
 // ===== Config =====
-// 1) สร้าง OAuth Client ID ที่ https://console.cloud.google.com/apis/credentials
-//    - Application type: Web application
-//    - Authorized JavaScript origins: เพิ่ม URL ของเว็บคุณ (เช่น https://localhost-two-swart.vercel.app)
-// 2) Enable "Google Calendar API" ใน project เดียวกัน
-// 3) เอา Client ID มาวางด้านล่าง
 const CONFIG = {
   storageKey: "shift-calendar-events",
+  shiftsStorageKey: "shift-calendar-shifts",
   googleClientId: "654720584846-0snt6savjakfaf91h2o6fov8fubmqjoe.apps.googleusercontent.com",
-  googleCalendarId: "mairu2share@gmail.com" // ปฏิทินปลายทาง (ต้อง login ด้วยบัญชีนี้ หรือบัญชีอื่นที่มีสิทธิ์เขียน)
+  googleCalendarId: "mairu2share@gmail.com"
 };
 
-const LEAVE_CODES = ["PL", "VL"];
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 const TZ = "+07:00";
 
-const SHIFT_MAP = {
+const DEFAULT_SHIFT_MAP = {
   "7N":  { type: "work", hours: 7,  start: "07:00", end: "14:00", overnight: false, building: "N", colorId: "2" },
   "7C":  { type: "work", hours: 7,  start: "07:00", end: "14:00", overnight: false, building: "C", colorId: "4" },
   "12N": { type: "work", hours: 12, start: "07:00", end: "19:00", overnight: false, building: "N", colorId: "10" },
@@ -24,6 +19,31 @@ const SHIFT_MAP = {
   "PL":  { type: "leave", label: "PL", colorId: "8" },
   "VL":  { type: "leave", label: "VL", colorId: "8" }
 };
+
+let SHIFT_MAP = loadShiftMap();
+
+function loadShiftMap() {
+  const raw = localStorage.getItem(CONFIG.shiftsStorageKey);
+  if (!raw) return { ...DEFAULT_SHIFT_MAP };
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { ...DEFAULT_SHIFT_MAP };
+  }
+}
+
+function saveShiftMap() {
+  localStorage.setItem(CONFIG.shiftsStorageKey, JSON.stringify(SHIFT_MAP));
+}
+
+function resetShiftMap() {
+  SHIFT_MAP = { ...DEFAULT_SHIFT_MAP };
+  saveShiftMap();
+}
+
+function isLeaveCode(code) {
+  return SHIFT_MAP[code]?.type === "leave";
+}
 
 // Google Calendar event color palette
 const COLOR_ID_HEX = {
@@ -178,6 +198,23 @@ async function createCalendarEvent(token, shift) {
   return res.json();
 }
 
+// ===== Shift map derivations =====
+function getWorkHours() {
+  return [...new Set(
+    Object.values(SHIFT_MAP).filter(c => c.type === "work").map(c => c.hours)
+  )].sort((a, b) => a - b);
+}
+
+function getWorkBuildings() {
+  return [...new Set(
+    Object.values(SHIFT_MAP).filter(c => c.type === "work").map(c => c.building)
+  )].sort();
+}
+
+function getLeaveCodes() {
+  return Object.keys(SHIFT_MAP).filter(code => SHIFT_MAP[code].type === "leave");
+}
+
 // ===== Shift modal =====
 function createShiftPicker(calendar) {
   const modal = document.getElementById("shiftModal");
@@ -188,24 +225,45 @@ function createShiftPicker(calendar) {
   let selectedBuilding = null;
   let selectedShift = null;
 
+  function renderButtons() {
+    buildingBtns.innerHTML = "";
+    getWorkBuildings().forEach(b => {
+      const btn = document.createElement("button");
+      btn.dataset.building = b;
+      btn.textContent = `ตึก ${b}`;
+      buildingBtns.appendChild(btn);
+    });
+
+    shiftBtns.innerHTML = "";
+    getWorkHours().forEach(h => {
+      const btn = document.createElement("button");
+      btn.dataset.shift = String(h);
+      btn.textContent = String(h);
+      shiftBtns.appendChild(btn);
+    });
+    getLeaveCodes().forEach(code => {
+      const btn = document.createElement("button");
+      btn.dataset.shift = code;
+      btn.textContent = code;
+      shiftBtns.appendChild(btn);
+    });
+  }
+
   function clearSelection() {
-    document.querySelectorAll(".btn-group button").forEach(b => b.classList.remove("selected"));
+    document.querySelectorAll("#shiftModal .btn-group button").forEach(b => b.classList.remove("selected"));
     selectedBuilding = null;
     selectedShift = null;
   }
 
   function open(dateStr) {
     selectedDate = dateStr;
+    renderButtons();
     clearSelection();
     modal.classList.add("active");
   }
 
   function close() {
     modal.classList.remove("active");
-  }
-
-  function isLeave(code) {
-    return LEAVE_CODES.includes(code);
   }
 
   function selectInGroup(groupEl, target) {
@@ -224,7 +282,7 @@ function createShiftPicker(calendar) {
     selectInGroup(shiftBtns, e.target);
     selectedShift = e.target.dataset.shift;
 
-    if (isLeave(selectedShift)) {
+    if (isLeaveCode(selectedShift)) {
       buildingBtns.querySelectorAll("button").forEach(b => b.classList.remove("selected"));
       selectedBuilding = null;
     }
@@ -240,12 +298,17 @@ function createShiftPicker(calendar) {
       alert("กรุณาเลือกเวร");
       return;
     }
-    if (!isLeave(selectedShift) && !selectedBuilding) {
+    if (!isLeaveCode(selectedShift) && !selectedBuilding) {
       alert("กรุณาเลือกตึก");
       return;
     }
 
-    const code = isLeave(selectedShift) ? selectedShift : selectedShift + selectedBuilding;
+    const code = isLeaveCode(selectedShift) ? selectedShift : selectedShift + selectedBuilding;
+    if (!SHIFT_MAP[code]) {
+      alert(`ไม่มีรหัส "${code}" ในการตั้งค่า กรุณาเพิ่มในเมนู "ตั้งค่าชนิดเวร" ก่อน`);
+      return;
+    }
+
     calendar.addEvent({
       title: code,
       start: selectedDate,
@@ -258,6 +321,228 @@ function createShiftPicker(calendar) {
   });
 
   return { open };
+}
+
+// ===== Shift settings (CRUD shift types) =====
+function createShiftSettings() {
+  const modal = document.getElementById("settingsModal");
+  const list = document.getElementById("shiftList");
+  const formModal = document.getElementById("shiftFormModal");
+  const formTitle = document.getElementById("shiftFormTitle");
+  const fCode = document.getElementById("shiftFormCode");
+  const fType = document.getElementById("shiftFormType");
+  const fHours = document.getElementById("shiftFormHours");
+  const fStart = document.getElementById("shiftFormStart");
+  const fEnd = document.getElementById("shiftFormEnd");
+  const fOvernight = document.getElementById("shiftFormOvernight");
+  const fBuilding = document.getElementById("shiftFormBuilding");
+  const fLabel = document.getElementById("shiftFormLabel");
+  const fColor = document.getElementById("shiftFormColor");
+  const workFields = document.getElementById("workFields");
+  const leaveFields = document.getElementById("leaveFields");
+
+  let editingCode = null;
+  let selectedType = "work";
+  let selectedColorId = "1";
+
+  function renderList() {
+    list.innerHTML = "";
+    const codes = Object.keys(SHIFT_MAP).sort();
+    if (codes.length === 0) {
+      list.innerHTML = "<li style='text-align:center; color:#999;'>ยังไม่มีชนิดเวร</li>";
+      return;
+    }
+    codes.forEach(code => {
+      const config = SHIFT_MAP[code];
+      const li = document.createElement("li");
+      li.className = "shift-list-item";
+
+      const swatch = document.createElement("span");
+      swatch.className = "color-swatch";
+      swatch.style.background = COLOR_ID_HEX[config.colorId] || "#999";
+
+      const info = document.createElement("div");
+      info.className = "shift-info";
+      const codeEl = document.createElement("strong");
+      codeEl.textContent = code;
+      const detailEl = document.createElement("small");
+      detailEl.textContent = config.type === "work"
+        ? `${config.hours} ชม • ${config.start}-${config.end}${config.overnight ? " (ข้ามวัน)" : ""} • ตึก ${config.building}`
+        : `ลา • ${config.label}`;
+      info.appendChild(codeEl);
+      info.appendChild(detailEl);
+
+      const actions = document.createElement("div");
+      actions.className = "shift-actions";
+      const editBtn = document.createElement("button");
+      editBtn.textContent = "✏️";
+      editBtn.title = "แก้ไข";
+      editBtn.addEventListener("click", () => openForm(code));
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "🗑️";
+      delBtn.title = "ลบ";
+      delBtn.addEventListener("click", () => {
+        if (!confirm(`ลบ "${code}" ?`)) return;
+        delete SHIFT_MAP[code];
+        saveShiftMap();
+        renderList();
+      });
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      li.appendChild(swatch);
+      li.appendChild(info);
+      li.appendChild(actions);
+      list.appendChild(li);
+    });
+  }
+
+  function renderColorPicker() {
+    fColor.innerHTML = "";
+    Object.entries(COLOR_ID_HEX).forEach(([id, hex]) => {
+      const swatch = document.createElement("button");
+      swatch.type = "button";
+      swatch.className = "color-swatch-btn";
+      swatch.style.background = hex;
+      swatch.dataset.colorId = id;
+      if (id === selectedColorId) swatch.classList.add("selected");
+      swatch.addEventListener("click", () => {
+        selectedColorId = id;
+        fColor.querySelectorAll("button").forEach(b => b.classList.remove("selected"));
+        swatch.classList.add("selected");
+      });
+      fColor.appendChild(swatch);
+    });
+  }
+
+  function setType(type) {
+    selectedType = type;
+    fType.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("selected", b.dataset.type === type);
+    });
+    workFields.style.display = type === "work" ? "" : "none";
+    leaveFields.style.display = type === "leave" ? "" : "none";
+  }
+
+  function openForm(code) {
+    editingCode = code || null;
+    if (code) {
+      const c = SHIFT_MAP[code];
+      formTitle.textContent = `แก้ไขชนิดเวร "${code}"`;
+      fCode.value = code;
+      fCode.disabled = true;
+      setType(c.type);
+      selectedColorId = c.colorId;
+      if (c.type === "work") {
+        fHours.value = c.hours;
+        fStart.value = c.start;
+        fEnd.value = c.end;
+        fOvernight.checked = !!c.overnight;
+        fBuilding.value = c.building;
+      } else {
+        fLabel.value = c.label;
+      }
+    } else {
+      formTitle.textContent = "เพิ่มชนิดเวร";
+      fCode.value = "";
+      fCode.disabled = false;
+      setType("work");
+      selectedColorId = "1";
+      fHours.value = "";
+      fStart.value = "07:00";
+      fEnd.value = "14:00";
+      fOvernight.checked = false;
+      fBuilding.value = "";
+      fLabel.value = "";
+    }
+    renderColorPicker();
+    formModal.classList.add("active");
+  }
+
+  function closeForm() {
+    formModal.classList.remove("active");
+  }
+
+  fType.addEventListener("click", e => {
+    if (!e.target.dataset.type) return;
+    setType(e.target.dataset.type);
+  });
+
+  document.getElementById("shiftFormCancel").addEventListener("click", closeForm);
+  formModal.addEventListener("click", e => {
+    if (e.target === formModal) closeForm();
+  });
+
+  document.getElementById("shiftFormSave").addEventListener("click", () => {
+    const code = fCode.value.trim();
+    if (!code) {
+      alert("กรุณาใส่รหัสเวร");
+      return;
+    }
+    if (!editingCode && SHIFT_MAP[code]) {
+      alert(`รหัส "${code}" มีอยู่แล้ว`);
+      return;
+    }
+
+    let config;
+    if (selectedType === "work") {
+      const hours = Number(fHours.value);
+      if (!hours || hours < 1) {
+        alert("กรุณาใส่จำนวนชั่วโมง");
+        return;
+      }
+      if (!fStart.value || !fEnd.value) {
+        alert("กรุณาใส่เวลาเริ่ม-จบ");
+        return;
+      }
+      if (!fBuilding.value.trim()) {
+        alert("กรุณาใส่ตึก");
+        return;
+      }
+      config = {
+        type: "work",
+        hours,
+        start: fStart.value,
+        end: fEnd.value,
+        overnight: fOvernight.checked,
+        building: fBuilding.value.trim(),
+        colorId: selectedColorId
+      };
+    } else {
+      const label = fLabel.value.trim() || code;
+      config = {
+        type: "leave",
+        label,
+        colorId: selectedColorId
+      };
+    }
+
+    SHIFT_MAP[code] = config;
+    saveShiftMap();
+    renderList();
+    closeForm();
+  });
+
+  document.getElementById("settingsBtn").addEventListener("click", () => {
+    renderList();
+    modal.classList.add("active");
+  });
+
+  document.getElementById("closeSettings").addEventListener("click", () => {
+    modal.classList.remove("active");
+  });
+
+  modal.addEventListener("click", e => {
+    if (e.target === modal) modal.classList.remove("active");
+  });
+
+  document.getElementById("addShiftBtn").addEventListener("click", () => openForm(null));
+
+  document.getElementById("resetShiftsBtn").addEventListener("click", () => {
+    if (!confirm("คืนค่าเริ่มต้นจะลบชนิดเวรที่ปรับเองทั้งหมด ดำเนินการต่อ?")) return;
+    resetShiftMap();
+    renderList();
+  });
 }
 
 // ===== Summary modal =====
@@ -409,6 +694,7 @@ document.addEventListener("DOMContentLoaded", () => {
   createSummaryModal(calendar);
   setupResetMonth(calendar);
   setupSendToGoogle(calendar);
+  createShiftSettings();
 
   loadEvents(calendar);
   calendar.render();
