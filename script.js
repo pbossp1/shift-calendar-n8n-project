@@ -178,24 +178,37 @@ function buildEventBody(shift) {
   };
 }
 
-async function createCalendarEvent(token, shift) {
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function createCalendarEvent(token, shift, { maxRetries = 4 } = {}) {
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CONFIG.googleCalendarId)}/events`;
   const body = buildEventBody(shift);
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
 
-  if (!res.ok) {
+    if (res.ok) return res.json();
+
     const text = await res.text();
+    const isRateLimit =
+      res.status === 429 ||
+      (res.status === 403 && /rateLimitExceeded|userRateLimitExceeded/i.test(text));
+
+    if (isRateLimit && attempt < maxRetries) {
+      await sleep(Math.min(1000 * 2 ** attempt, 16000));
+      continue;
+    }
     throw new Error(`HTTP ${res.status}: ${text}`);
   }
-  return res.json();
 }
 
 // ===== Shift map derivations =====
@@ -645,17 +658,24 @@ function setupSendToGoogle(calendar) {
 
     try {
       const token = await googleAuth.getToken();
-      const results = await Promise.allSettled(
-        shifts.map(s => createCalendarEvent(token, s))
-      );
 
-      const ok = results.filter(r => r.status === "fulfilled").length;
-      const fail = results.length - ok;
+      let ok = 0;
+      let firstErr = null;
+      for (let i = 0; i < shifts.length; i++) {
+        btn.textContent = `กำลังส่ง... (${i + 1}/${shifts.length})`;
+        try {
+          await createCalendarEvent(token, shifts[i]);
+          ok++;
+        } catch (e) {
+          if (!firstErr) firstErr = e.message;
+        }
+        if (i < shifts.length - 1) await sleep(150);
+      }
 
+      const fail = shifts.length - ok;
       if (fail === 0) {
         alert(`ส่งเวรเข้า Google Calendar สำเร็จ ✅\n(${ok} เวร)`);
       } else {
-        const firstErr = results.find(r => r.status === "rejected")?.reason?.message;
         alert(`ส่งสำเร็จ ${ok} เวร, ล้มเหลว ${fail} เวร\nสาเหตุ: ${firstErr}`);
       }
     } catch (err) {
