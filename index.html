@@ -23,7 +23,7 @@
       <button id="summaryBtn">📊 สรุปเวรทั้งหมด</button>
       <button id="resetMonthBtn">♻️ ล้างเดือนนี้ในเว็บ</button>
       <button id="sendToGoogleBtn">🚀 ส่งเข้า Google Calendar</button>
-      <button id="settingsBtn">⚙️ ตั้งค่าพรีเซ็ท</button>
+      <button id="settingsBtn">⚙️ ตั้งค่าตึก / เวลาเวร</button>
     </div>
     <p class="help-text">ส่งเฉพาะวันที่ยังไม่มีเวรใน Google Calendar • ใช้วันเริ่มเวรตามเวลาไทย<br>ลบในเว็บไม่ลบใน Google หากต้องการเปลี่ยนรายการที่ส่งแล้ว ให้แก้ใน Google Calendar</p>
     <p id="sendStatus" class="send-status" role="status" aria-live="polite"></p>
@@ -31,9 +31,13 @@
 
   <div id="shiftModal" class="modal">
     <div class="modal-content">
-      <h3>✨ เลือกพรีเซ็ทเวร</h3>
-      <p id="shiftPickerDate"></p>
-      <div id="shiftBtns" class="preset-options"></div>
+      <h3>✨ เลือกเวร</h3>
+      <p id="shiftPickerDate" class="form-hint"></p>
+      <p>🏥 ตึก</p>
+      <div id="buildingBtns" class="btn-group"></div>
+      <p>⏰ เวร</p>
+      <div id="shiftBtns" class="btn-group"></div>
+      <p id="shiftSelectionDetail" class="form-hint" aria-live="polite"></p>
 
       <div class="modal-actions">
         <button id="cancelBtn">ยกเลิก</button>
@@ -54,59 +58,43 @@
 
   <div id="settingsModal" class="modal">
     <div class="modal-content modal-content-wide">
-      <h3>⚙️ จัดการพรีเซ็ท</h3>
-      <p class="form-hint">เพิ่มเวรประจำ พาร์ทไทม์ หรือ On-call ได้ การแก้/ลบพรีเซ็ทมีผลกับเวรที่จะเพิ่มใหม่เท่านั้น</p>
-      <ul id="shiftList"></ul>
-      <div class="modal-actions">
-        <button id="resetShiftsBtn">♻️ คืนค่าเริ่มต้น</button>
-        <button id="addShiftBtn">+ เพิ่มพรีเซ็ท</button>
-        <button id="closeSettings">ปิด</button>
-      </div>
+      <h3>⚙️ ตึก / เวลาเวร</h3>
+      <p class="form-hint">เพิ่มตึกหรือเวลาแล้วเลือกใช้คู่กันได้เลย การแก้ไขมีผลกับเวรที่จะลงใหม่</p>
+      <section class="settings-section">
+        <div class="settings-heading"><h4>ตึก / สถานที่</h4><button id="addBuildingBtn">+ เพิ่มตึก</button></div>
+        <ul id="buildingList" class="options-list"></ul>
+      </section>
+      <section class="settings-section">
+        <div class="settings-heading"><h4>เวลาเวร</h4><button id="addPeriodBtn">+ เพิ่มเวลา</button></div>
+        <ul id="periodList" class="options-list"></ul>
+      </section>
+      <section class="settings-section">
+        <div class="settings-heading"><h4>วันลา</h4><button id="addLeaveBtn">+ เพิ่มวันลา</button></div>
+        <ul id="leaveList" class="options-list"></ul>
+      </section>
+      <div class="modal-actions"><button id="closeSettings">ปิด</button></div>
     </div>
   </div>
 
   <div id="shiftFormModal" class="modal">
     <div class="modal-content">
-      <h3 id="shiftFormTitle">เพิ่มพรีเซ็ท</h3>
-
-      <input id="shiftFormCode" type="hidden" />
-      <div id="leaveFields">
-        <label for="shiftFormLabel">ชื่อพรีเซ็ท / วันลา</label>
-        <input id="shiftFormLabel" type="text" maxlength="80" placeholder="เช่น พาร์ทไทม์คลินิก A / On-call กลางคืน" />
-      </div>
-
-      <p>ประเภท</p>
-      <div id="shiftFormType" class="btn-group">
-        <button data-type="work">ทำงาน</button>
-        <button data-type="leave">ลา</button>
-      </div>
-
+      <h3 id="shiftFormTitle">เพิ่มเวลาเวร</h3>
+      <p><label for="optionCode">ชื่อย่อที่แสดงบนปุ่ม</label></p>
+      <input id="optionCode" type="text" maxlength="8" autocomplete="off" />
+      <p><label for="optionName">ชื่อเต็ม (ไม่บังคับ)</label></p>
+      <input id="optionName" type="text" maxlength="80" />
       <div id="workFields">
-        <p><label for="shiftFormCategory">กลุ่มเวร</label></p>
-        <select id="shiftFormCategory">
-          <option value="regular">เวรประจำ</option>
-          <option value="parttime">พาร์ทไทม์</option>
-          <option value="oncall">On-call</option>
-        </select>
-        <p class="form-hint">ชั่วโมงคำนวณจากเวลาเริ่ม–เลิก รองรับเวรไม่เกิน 24 ชั่วโมง</p>
-
-        <p>เวลาเริ่ม</p>
+        <p><label for="shiftFormStart">เวลาเริ่ม</label></p>
         <input id="shiftFormStart" type="time" />
-
-        <p>เวลาจบ</p>
+        <p><label for="shiftFormEnd">เวลาเลิก</label></p>
         <input id="shiftFormEnd" type="time" />
-
-        <p>
-          <label><input id="shiftFormOvernight" type="checkbox" /> ข้ามวัน (จบในวันถัดไป)</label>
-        </p>
-
-        <p>สถานที่ / ตึก</p>
-        <input id="shiftFormBuilding" type="text" maxlength="80" />
+        <p><label><input id="shiftFormOvernight" type="checkbox" /> เลิกวันถัดไป</label></p>
+        <p id="shiftDuration" class="form-hint" aria-live="polite"></p>
       </div>
-
-      <p>สี (Google Calendar palette)</p>
-      <div id="shiftFormColor" class="color-grid"></div>
-
+      <div id="colorFields">
+        <p>สี</p>
+        <div id="shiftFormColor" class="color-grid"></div>
+      </div>
       <div class="modal-actions">
         <button id="shiftFormCancel">ยกเลิก</button>
         <button id="shiftFormSave">✓ บันทึก</button>

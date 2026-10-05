@@ -2,6 +2,7 @@
 const CONFIG = {
   storageKey: "shift-calendar-events",
   shiftsStorageKey: "shift-calendar-shifts",
+  optionsStorageKey: "shift-calendar-options-v1",
   googleClientId: "654720584846-0snt6savjakfaf91h2o6fov8fubmqjoe.apps.googleusercontent.com",
   googleCalendarId: "mairu2share@gmail.com"
 };
@@ -21,7 +22,7 @@ const DEFAULT_SHIFT_MAP = {
   "VL":  { type: "leave", label: "VL", colorId: "8" }
 };
 
-let SHIFT_MAP = loadShiftMap();
+const SHIFT_MAP = loadShiftMap();
 
 function loadShiftMap() {
   const raw = localStorage.getItem(CONFIG.shiftsStorageKey);
@@ -43,15 +44,6 @@ function loadShiftMap() {
   }
 }
 
-function saveShiftMap() {
-  localStorage.setItem(CONFIG.shiftsStorageKey, JSON.stringify(SHIFT_MAP));
-}
-
-function resetShiftMap() {
-  SHIFT_MAP = structuredClone(DEFAULT_SHIFT_MAP);
-  saveShiftMap();
-}
-
 // Google Calendar event color palette
 const COLOR_ID_HEX = {
   "1":  "#7986CB", // Lavender
@@ -67,11 +59,6 @@ const COLOR_ID_HEX = {
   "11": "#D50000"  // Tomato
 };
 
-function getShiftColor(code) {
-  const config = SHIFT_MAP[code];
-  return config ? COLOR_ID_HEX[config.colorId] : "#999";
-}
-
 const CATEGORY_LABELS = { regular: "เวรประจำ", parttime: "พาร์ทไทม์", oncall: "On-call" };
 let isSending = false;
 
@@ -79,12 +66,6 @@ function buildSummary(config) {
   if (config.type !== "work") return config.label;
   const name = config.label?.trim() || `Vic ${config.building}`;
   return `${config.start}-${config.end} ${name}`;
-}
-
-function shiftDescription(config) {
-  return config.type === "work"
-    ? `${CATEGORY_LABELS[config.category] || "เวรประจำ"} • ${config.start}–${config.end}${config.overnight ? " (+1 วัน)" : ""} • ${config.building} • ${config.hours} ชม.`
-    : "วันลา / วันหยุด";
 }
 
 function validatePreset(config) {
@@ -103,6 +84,89 @@ function validatePreset(config) {
     throw new Error("เวลาเลิกต้องอยู่หลังเวลาเริ่ม และเวรต้องไม่เกิน 24 ชั่วโมง (เวรข้ามคืนให้เลือกข้ามวัน)");
   }
   config.hours = Math.round(duration / 60 * 100) / 100;
+}
+
+function legacyPeriodName(config) {
+  return config.label === `Vic ${config.building}` ? "" : config.label || "";
+}
+
+// Buildings and time slots are independent: any building can use any time slot.
+function migrateOptions(map) {
+  const options = { version: 1, buildings: [], periods: [], leaves: [], colors: {} };
+  const uniqueCode = (items, preferred) => {
+    let code = preferred, n = 2;
+    while (items.some(item => item.code === code)) code = `${preferred}-${n++}`;
+    return code;
+  };
+  for (const [key, config] of Object.entries(map)) {
+    if (config.type === "leave") {
+      options.leaves.push({ id: crypto.randomUUID(), code: config.label || key, name: "", colorId: config.colorId });
+      continue;
+    }
+    if (config.type !== "work") continue;
+    let building = options.buildings.find(b => b.legacyName === config.building);
+    if (!building) {
+      const shortName = /^[^\s]{1,8}$/.test(config.building) ? config.building : `P${options.buildings.length + 1}`;
+      building = { id: crypto.randomUUID(), code: uniqueCode(options.buildings, shortName), name: config.building, legacyName: config.building };
+      options.buildings.push(building);
+    }
+    let period = options.periods.find(p => p.start === config.start && p.end === config.end &&
+      p.overnight === !!config.overnight && p.name === legacyPeriodName(config) && p.category === (config.category || "regular"));
+    if (!period) {
+      const preferred = config.category === "oncall" ? "OC" : String(config.hours);
+      period = { id: crypto.randomUUID(), code: uniqueCode([...options.periods, ...options.leaves], preferred),
+        name: legacyPeriodName(config), category: config.category || "regular", start: config.start, end: config.end,
+        overnight: !!config.overnight, hours: config.hours, colorId: config.colorId };
+      options.periods.push(period);
+    }
+    options.colors[`${building.id}:${period.id}`] = config.colorId;
+  }
+  return options;
+}
+
+function loadOptions() {
+  const raw = localStorage.getItem(CONFIG.optionsStorageKey);
+  if (raw) {
+    try {
+      const saved = JSON.parse(raw);
+      if (saved?.version !== 1 || ![saved.buildings, saved.periods, saved.leaves].every(Array.isArray) || !saved.colors) {
+        throw new Error("Invalid shift options");
+      }
+      return saved;
+    } catch (error) { console.error("Load options failed", error); }
+  }
+  const options = migrateOptions(SHIFT_MAP);
+  localStorage.setItem(CONFIG.optionsStorageKey, JSON.stringify(options));
+  return options;
+}
+
+let OPTIONS = loadOptions();
+function saveOptions() { localStorage.setItem(CONFIG.optionsStorageKey, JSON.stringify(OPTIONS)); }
+
+function makeWorkPreset(building, period) {
+  const config = {
+    type: "work", building: building.code, place: building.name || building.code,
+    start: period.start, end: period.end, overnight: period.overnight, hours: period.hours,
+    category: period.category || "regular", label: period.name ? `${period.name} ${building.code}` : "",
+    displayCode: `${period.code}${building.code}`,
+    colorId: OPTIONS.colors[`${building.id}:${period.id}`] || period.colorId || "1"
+  };
+  return config;
+}
+
+function compactTitle(config) {
+  if (config.displayCode) return config.displayCode;
+  if (config.type === "leave") return config.label;
+  const building = OPTIONS.buildings.find(b => b.legacyName === config.building || b.code === config.building);
+  const period = OPTIONS.periods.find(p => p.start === config.start && p.end === config.end &&
+    p.overnight === !!config.overnight && p.name === legacyPeriodName(config) && p.category === (config.category || "regular"));
+  return `${period?.code || config.hours}${building?.code || config.building}`;
+}
+
+function getKnownPresets() {
+  return [...Object.values(SHIFT_MAP),
+    ...OPTIONS.buildings.flatMap(b => OPTIONS.periods.map(p => makeWorkPreset(b, p))),
+    ...OPTIONS.leaves.map(l => ({ type: "leave", label: l.code, colorId: l.colorId }))];
 }
 
 function eventConfig(ev) {
@@ -134,7 +198,10 @@ function loadEvents(calendar) {
       ev.extendedProps.code ||= ev.title;
       if (!ev.extendedProps.preset && SHIFT_MAP[ev.extendedProps.code]) {
         ev.extendedProps.preset = structuredClone(SHIFT_MAP[ev.extendedProps.code]);
-        ev.title = ev.extendedProps.preset.label || buildSummary(ev.extendedProps.preset);
+      }
+      if (ev.extendedProps.preset) {
+        ev.extendedProps.preset.displayCode ||= compactTitle(ev.extendedProps.preset);
+        ev.title = ev.extendedProps.preset.displayCode;
       }
       calendar.addEvent(ev);
     });
@@ -240,7 +307,7 @@ function buildEventBody(shift) {
       start: { dateTime: `${startDate}T${config.start}:00${TZ}`, timeZone: TIME_ZONE },
       end:   { dateTime: `${endDate}T${config.end}:00${TZ}`, timeZone: TIME_ZONE },
       colorId: config.colorId,
-      description: `ตึก ${config.building}\nเวร ${config.hours} ชม\n${CATEGORY_LABELS[config.category] || "เวรประจำ"}`
+      description: `ตึก ${config.building}\nเวร ${config.hours} ชม\n${CATEGORY_LABELS[config.category] || "เวรประจำ"}\nสถานที่ ${config.place || config.building}`
     };
   }
 
@@ -337,7 +404,7 @@ function googleEventDate(event) {
   return new Date(date.getTime() + 7 * 3600000).toISOString().slice(0, 10);
 }
 
-function isShiftEvent(event, presets = Object.values(SHIFT_MAP)) {
+function isShiftEvent(event, presets = getKnownPresets()) {
   if (event.status === "cancelled") return false;
   if (event.extendedProperties?.private?.source === "shift-calendar") return true;
   // Recognize exports made before metadata was introduced, including the old n8n titles.
@@ -379,37 +446,62 @@ async function createCalendarEvent(token, shift) {
   throw new Error("รายการวันนี้ถูกลบและสร้างใหม่หลายครั้ง กรุณาตรวจ Google Calendar");
 }
 
-// ===== Preset picker: select the actual key, never construct hours + building =====
+// ===== Original two-step picker: building, then shift =====
 function createShiftPicker(calendar) {
   const modal = document.getElementById("shiftModal");
-  const buttons = document.getElementById("shiftBtns");
-  let selectedDate = null;
-  let selectedCode = null;
+  const buildingBtns = document.getElementById("buildingBtns");
+  const shiftBtns = document.getElementById("shiftBtns");
+  const detail = document.getElementById("shiftSelectionDetail");
+  let selectedDate, buildingId, periodId, leaveId;
+
+  function currentPreset() {
+    const leave = OPTIONS.leaves.find(l => l.id === leaveId);
+    if (leave) return { type: "leave", label: leave.code, displayCode: leave.code, colorId: leave.colorId };
+    const building = OPTIONS.buildings.find(b => b.id === buildingId);
+    const period = OPTIONS.periods.find(p => p.id === periodId);
+    return building && period ? makeWorkPreset(building, period) : null;
+  }
+
+  function updateSelection() {
+    buildingBtns.querySelectorAll("button").forEach(b => b.classList.toggle("selected", b.dataset.buildingId === buildingId));
+    shiftBtns.querySelectorAll("button").forEach(b => b.classList.toggle("selected",
+      (periodId && b.dataset.periodId === periodId) || (leaveId && b.dataset.leaveId === leaveId)));
+    const preset = currentPreset();
+    detail.textContent = !preset ? "เลือกตึกและเวร หรือเลือกวันลา" : preset.type === "leave" ? preset.label
+      : `${preset.displayCode} · ${preset.start}–${preset.end}${preset.overnight ? " (วันถัดไป)" : ""}${preset.place !== preset.building ? ` · ${preset.place}` : ""}`;
+  }
 
   function close() { modal.classList.remove("active"); }
   function open(dateStr) {
     if (isSending) return;
     selectedDate = dateStr;
-    selectedCode = null;
+    buildingId = periodId = leaveId = null;
     document.getElementById("shiftPickerDate").textContent = dateStr;
-    buttons.innerHTML = "";
-    Object.entries(SHIFT_MAP).forEach(([code, config]) => {
+    buildingBtns.innerHTML = "";
+    shiftBtns.innerHTML = "";
+    OPTIONS.buildings.forEach(building => {
       const btn = document.createElement("button");
-      btn.type = "button";
-      btn.dataset.code = code;
-      btn.style.borderLeft = `6px solid ${getShiftColor(code)}`;
-      const name = document.createElement("strong");
-      name.textContent = config.label || buildSummary(config);
-      const detail = document.createElement("small");
-      detail.textContent = shiftDescription(config);
-      btn.append(name, detail);
-      btn.addEventListener("click", () => {
-        selectedCode = code;
-        buttons.querySelectorAll("button").forEach(b => b.classList.toggle("selected", b === btn));
-      });
-      buttons.appendChild(btn);
+      btn.type = "button"; btn.textContent = building.code; btn.title = building.name || building.code;
+      btn.dataset.buildingId = building.id;
+      btn.addEventListener("click", () => { buildingId = building.id; leaveId = null; updateSelection(); });
+      buildingBtns.appendChild(btn);
     });
-    if (!Object.keys(SHIFT_MAP).length) buttons.textContent = "ยังไม่มีพรีเซ็ท เพิ่มได้ที่ปุ่มตั้งค่าพรีเซ็ท";
+    OPTIONS.periods.forEach(period => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.textContent = period.code; btn.dataset.periodId = period.id;
+      btn.title = `${period.name || period.code} · ${period.start}–${period.end}${period.overnight ? " (วันถัดไป)" : ""}`;
+      btn.addEventListener("click", () => { periodId = period.id; leaveId = null; updateSelection(); });
+      shiftBtns.appendChild(btn);
+    });
+    OPTIONS.leaves.forEach(leave => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.textContent = leave.code; btn.dataset.leaveId = leave.id;
+      btn.addEventListener("click", () => { leaveId = leave.id; buildingId = periodId = null; updateSelection(); });
+      shiftBtns.appendChild(btn);
+    });
+    if (!OPTIONS.buildings.length) buildingBtns.textContent = "เพิ่มตึกได้ในตั้งค่าตึก / เวลาเวร";
+    if (!OPTIONS.periods.length && !OPTIONS.leaves.length) shiftBtns.textContent = "เพิ่มเวลาเวรได้ในตั้งค่า";
+    updateSelection();
     modal.classList.add("active");
   }
 
@@ -417,16 +509,16 @@ function createShiftPicker(calendar) {
   modal.addEventListener("click", e => { if (e.target === modal) close(); });
   document.getElementById("confirmBtn").addEventListener("click", () => {
     if (isSending) return;
-    const preset = SHIFT_MAP[selectedCode];
-    if (!preset) { alert("กรุณาเลือกพรีเซ็ท"); return; }
+    const preset = currentPreset();
+    if (!preset) { alert("กรุณาเลือกตึกและเวร หรือเลือกวันลา"); return; }
     if (calendar.getEvents().some(ev => ev.startStr.slice(0, 10) === selectedDate)) {
       alert("วันนี้มีเวรในตารางแล้ว หากต้องการเปลี่ยน ให้ลบเวรเดิมในเว็บก่อน");
       return;
     }
     calendar.addEvent({
-      id: crypto.randomUUID(), title: preset.label || buildSummary(preset), start: selectedDate,
-      allDay: true, backgroundColor: getShiftColor(selectedCode),
-      extendedProps: { code: selectedCode, preset: structuredClone(preset) }
+      id: crypto.randomUUID(), title: preset.displayCode, start: selectedDate,
+      allDay: true, backgroundColor: COLOR_ID_HEX[preset.colorId] || "#999",
+      extendedProps: { code: preset.displayCode, preset: structuredClone(preset) }
     });
     saveEvents(calendar);
     close();
@@ -434,223 +526,131 @@ function createShiftPicker(calendar) {
   return { open };
 }
 
-// ===== Shift settings (CRUD shift types) =====
+// ===== Settings: add/edit/delete buildings and time slots independently =====
 function createShiftSettings() {
   const modal = document.getElementById("settingsModal");
-  const list = document.getElementById("shiftList");
-  const formModal = document.getElementById("shiftFormModal");
-  const formTitle = document.getElementById("shiftFormTitle");
-  const fCode = document.getElementById("shiftFormCode");
-  const fType = document.getElementById("shiftFormType");
-  const fCategory = document.getElementById("shiftFormCategory");
-  const fStart = document.getElementById("shiftFormStart");
-  const fEnd = document.getElementById("shiftFormEnd");
-  const fOvernight = document.getElementById("shiftFormOvernight");
-  const fBuilding = document.getElementById("shiftFormBuilding");
-  const fLabel = document.getElementById("shiftFormLabel");
-  const fColor = document.getElementById("shiftFormColor");
+  const form = document.getElementById("shiftFormModal");
+  const title = document.getElementById("shiftFormTitle");
+  const codeInput = document.getElementById("optionCode");
+  const nameInput = document.getElementById("optionName");
+  const startInput = document.getElementById("shiftFormStart");
+  const endInput = document.getElementById("shiftFormEnd");
+  const overnightInput = document.getElementById("shiftFormOvernight");
   const workFields = document.getElementById("workFields");
-  const leaveFields = document.getElementById("leaveFields");
+  const colorFields = document.getElementById("colorFields");
+  const colorPicker = document.getElementById("shiftFormColor");
+  const duration = document.getElementById("shiftDuration");
+  const groups = {
+    buildings: { label: "ตึก", list: document.getElementById("buildingList") },
+    periods: { label: "เวลาเวร", list: document.getElementById("periodList") },
+    leaves: { label: "วันลา", list: document.getElementById("leaveList") }
+  };
+  let kind, editingId, selectedColorId;
 
-  let editingCode = null;
-  let selectedType = "work";
-  let selectedColorId = "1";
-
-  function renderList() {
-    list.innerHTML = "";
-    const codes = Object.keys(SHIFT_MAP).sort();
-    if (codes.length === 0) {
-      list.innerHTML = "<li style='text-align:center; color:#999;'>ยังไม่มีชนิดเวร</li>";
-      return;
-    }
-    codes.forEach(code => {
-      const config = SHIFT_MAP[code];
-      const li = document.createElement("li");
-      li.className = "shift-list-item";
-
-      const swatch = document.createElement("span");
-      swatch.className = "color-swatch";
-      swatch.style.background = COLOR_ID_HEX[config.colorId] || "#999";
-
-      const info = document.createElement("div");
-      info.className = "shift-info";
-      const codeEl = document.createElement("strong");
-      codeEl.textContent = config.label || buildSummary(config);
-      const detailEl = document.createElement("small");
-      detailEl.textContent = shiftDescription(config);
-      info.appendChild(codeEl);
-      info.appendChild(detailEl);
-
-      const actions = document.createElement("div");
-      actions.className = "shift-actions";
-      const editBtn = document.createElement("button");
-      editBtn.textContent = "✏️";
-      editBtn.title = "แก้ไข";
-      editBtn.addEventListener("click", () => openForm(code));
-      const delBtn = document.createElement("button");
-      delBtn.textContent = "🗑️";
-      delBtn.title = "ลบ";
-      delBtn.addEventListener("click", () => {
-        if (isSending) return;
-        if (!confirm(`ลบพรีเซ็ท "${config.label || code}" ? เวรที่ลงไว้แล้วจะยังอยู่และส่งได้ตามเดิม`)) return;
-        delete SHIFT_MAP[code];
-        saveShiftMap();
-        renderList();
-      });
-      actions.appendChild(editBtn);
-      actions.appendChild(delBtn);
-
-      li.appendChild(swatch);
-      li.appendChild(info);
-      li.appendChild(actions);
-      list.appendChild(li);
-    });
+  function updateDuration() {
+    if (kind !== "periods") return;
+    const config = { type: "work", building: "N", start: startInput.value, end: endInput.value, overnight: overnightInput.checked };
+    try {
+      validatePreset(config);
+      duration.textContent = `${config.hours} ชั่วโมง · ตัวอย่างในตาราง: ${codeInput.value.trim() || config.hours}N`;
+    } catch { duration.textContent = "เวรข้ามคืนให้เลือก ‘เลิกวันถัดไป’"; }
   }
+  [codeInput, startInput, endInput, overnightInput].forEach(el => el.addEventListener("input", updateDuration));
 
-  function renderColorPicker() {
-    fColor.innerHTML = "";
+  function renderColors() {
+    colorPicker.innerHTML = "";
     Object.entries(COLOR_ID_HEX).forEach(([id, hex]) => {
-      const swatch = document.createElement("button");
-      swatch.type = "button";
-      swatch.className = "color-swatch-btn";
-      swatch.style.background = hex;
-      swatch.dataset.colorId = id;
-      if (id === selectedColorId) swatch.classList.add("selected");
-      swatch.addEventListener("click", () => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "color-swatch-btn"; btn.style.background = hex;
+      btn.title = `สี ${id}`; btn.dataset.colorId = id;
+      btn.classList.toggle("selected", id === selectedColorId);
+      btn.addEventListener("click", () => {
         selectedColorId = id;
-        fColor.querySelectorAll("button").forEach(b => b.classList.remove("selected"));
-        swatch.classList.add("selected");
+        colorPicker.querySelectorAll("button").forEach(b => b.classList.toggle("selected", b === btn));
       });
-      fColor.appendChild(swatch);
+      colorPicker.appendChild(btn);
     });
   }
 
-  function setType(type) {
-    selectedType = type;
-    fType.querySelectorAll("button").forEach(b => {
-      b.classList.toggle("selected", b.dataset.type === type);
-    });
-    workFields.style.display = type === "work" ? "" : "none";
-    leaveFields.style.display = "";
-  }
-
-  function openForm(code) {
+  function openForm(group, item = null) {
     if (isSending) return;
-    editingCode = code || null;
-    fStart.value = "07:00";
-    fEnd.value = "15:00";
-    fOvernight.checked = false;
-    fBuilding.value = "";
-    if (code) {
-      const c = SHIFT_MAP[code];
-      formTitle.textContent = "แก้ไขพรีเซ็ท";
-      fCode.value = code;
-      fCode.disabled = true;
-      fLabel.value = c.label || `Vic ${c.building}`;
-      fCategory.value = c.category || "regular";
-      setType(c.type);
-      selectedColorId = c.colorId;
-      if (c.type === "work") {
-        fStart.value = c.start;
-        fEnd.value = c.end;
-        fOvernight.checked = !!c.overnight;
-        fBuilding.value = c.building;
-      } else {
-        fLabel.value = c.label;
-      }
-    } else {
-      formTitle.textContent = "เพิ่มพรีเซ็ท";
-      fCode.value = "";
-      fCode.disabled = false;
-      setType("work");
-      selectedColorId = "1";
-      fCategory.value = "regular";
-      fStart.value = "07:00";
-      fEnd.value = "15:00";
-      fOvernight.checked = false;
-      fBuilding.value = "";
-      fLabel.value = "";
-    }
-    renderColorPicker();
-    formModal.classList.add("active");
+    kind = group; editingId = item?.id || null;
+    title.textContent = `${item ? "แก้ไข" : "เพิ่ม"}${groups[group].label}`;
+    codeInput.value = item?.code || "";
+    codeInput.placeholder = group === "buildings" ? "เช่น N, C, PT" : group === "periods" ? "เช่น 8, 12, 24, OC" : "เช่น PL, VL";
+    nameInput.value = item?.name || "";
+    nameInput.placeholder = group === "buildings" ? "เช่น คลินิกพาร์ทไทม์" : group === "periods" ? "เช่น On-call กลางคืน" : "เช่น ลาพักร้อน";
+    startInput.value = item?.start || "07:00";
+    endInput.value = item?.end || "15:00";
+    overnightInput.checked = !!item?.overnight;
+    selectedColorId = item?.colorId || (group === "leaves" ? "8" : "1");
+    workFields.style.display = group === "periods" ? "" : "none";
+    colorFields.style.display = group === "buildings" ? "none" : "";
+    renderColors(); updateDuration();
+    form.classList.add("active");
   }
 
-  function closeForm() {
-    formModal.classList.remove("active");
+  function renderLists() {
+    Object.entries(groups).forEach(([group, meta]) => {
+      meta.list.innerHTML = "";
+      OPTIONS[group].forEach(item => {
+        const li = document.createElement("li"); li.className = "shift-list-item";
+        const info = document.createElement("div"); info.className = "shift-info";
+        const name = document.createElement("strong"); name.textContent = item.code;
+        const detail = document.createElement("small");
+        detail.textContent = group === "periods" ? `${item.start}–${item.end}${item.overnight ? " (+1 วัน)" : ""}${item.name ? ` · ${item.name}` : ""}` : item.name;
+        info.append(name, detail);
+        const actions = document.createElement("div"); actions.className = "shift-actions";
+        const edit = document.createElement("button"); edit.textContent = "แก้ไข";
+        edit.addEventListener("click", () => openForm(group, item));
+        const del = document.createElement("button"); del.textContent = "ลบ";
+        del.addEventListener("click", () => {
+          if (isSending || !confirm(`ลบ${meta.label} ${item.code}? เวรที่ลงไว้แล้วจะยังอยู่`)) return;
+          OPTIONS[group] = OPTIONS[group].filter(option => option.id !== item.id);
+          Object.keys(OPTIONS.colors).filter(key => key.split(":").includes(item.id)).forEach(key => delete OPTIONS.colors[key]);
+          saveOptions(); renderLists();
+        });
+        actions.append(edit, del); li.append(info, actions); meta.list.appendChild(li);
+      });
+      if (!OPTIONS[group].length) meta.list.textContent = `ยังไม่มี${meta.label}`;
+    });
   }
-
-  fType.addEventListener("click", e => {
-    if (!e.target.dataset.type) return;
-    setType(e.target.dataset.type);
-  });
-
-  document.getElementById("shiftFormCancel").addEventListener("click", closeForm);
-  formModal.addEventListener("click", e => {
-    if (e.target === formModal) closeForm();
-  });
 
   document.getElementById("shiftFormSave").addEventListener("click", () => {
     if (isSending) return;
-    const code = fCode.value.trim() || (editingCode ? editingCode : `preset-${crypto.randomUUID()}`);
-    if (!fLabel.value.trim()) {
-      alert("กรุณาใส่ชื่อพรีเซ็ท");
-      return;
+    const code = codeInput.value.trim();
+    if (!code || /\s/.test(code) || code.length > 8) { alert("กรุณาใส่ชื่อย่อ 1–8 ตัวอักษร โดยไม่เว้นวรรค"); return; }
+    const peers = kind === "buildings" ? OPTIONS.buildings : [...OPTIONS.periods, ...OPTIONS.leaves];
+    if (peers.some(option => option.id !== editingId && option.code.toUpperCase() === code.toUpperCase())) {
+      alert("ชื่อย่อนี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น"); return;
     }
-    if (["__proto__", "constructor", "prototype"].includes(code) || (!editingCode && Object.hasOwn(SHIFT_MAP, code))) {
-      alert(`รหัส "${code}" มีอยู่แล้ว`);
-      return;
+    const previous = OPTIONS[kind].find(option => option.id === editingId);
+    const item = { ...previous, id: editingId || crypto.randomUUID(), code, name: nameInput.value.trim() };
+    if (kind !== "buildings") item.colorId = selectedColorId;
+    if (kind === "periods") {
+      const config = { type: "work", building: "N", start: startInput.value, end: endInput.value, overnight: overnightInput.checked };
+      try { validatePreset(config); } catch (error) { alert(error.message); return; }
+      Object.assign(item, { start: config.start, end: config.end, overnight: config.overnight, hours: config.hours,
+        category: code.toUpperCase() === "OC" ? "oncall" : previous?.category || "regular" });
+      if (previous && previous.colorId !== item.colorId) {
+        OPTIONS.buildings.forEach(b => delete OPTIONS.colors[`${b.id}:${item.id}`]);
+      }
     }
-
-    let config;
-    if (selectedType === "work") {
-      config = {
-        type: "work",
-        label: fLabel.value.trim(),
-        category: fCategory.value,
-        start: fStart.value,
-        end: fEnd.value,
-        overnight: fOvernight.checked,
-        building: fBuilding.value.trim(),
-        colorId: selectedColorId
-      };
-    } else {
-      const label = fLabel.value.trim() || code;
-      config = {
-        type: "leave",
-        label,
-        colorId: selectedColorId
-      };
-    }
-
-    try { validatePreset(config); } catch (error) { alert(error.message); return; }
-    SHIFT_MAP[code] = config;
-    saveShiftMap();
-    renderList();
-    closeForm();
+    if (editingId) OPTIONS[kind] = OPTIONS[kind].map(option => option.id === editingId ? item : option);
+    else OPTIONS[kind].push(item);
+    saveOptions(); renderLists(); form.classList.remove("active");
   });
-
   document.getElementById("settingsBtn").addEventListener("click", () => {
     if (isSending) return;
-    renderList();
-    modal.classList.add("active");
+    renderLists(); modal.classList.add("active");
   });
-
-  document.getElementById("closeSettings").addEventListener("click", () => {
-    modal.classList.remove("active");
-  });
-
-  modal.addEventListener("click", e => {
-    if (e.target === modal) modal.classList.remove("active");
-  });
-
-  document.getElementById("addShiftBtn").addEventListener("click", () => openForm(null));
-
-  document.getElementById("resetShiftsBtn").addEventListener("click", () => {
-    if (isSending) return;
-    if (!confirm("คืนค่าเริ่มต้นจะลบชนิดเวรที่ปรับเองทั้งหมด ดำเนินการต่อ?")) return;
-    resetShiftMap();
-    renderList();
-  });
+  document.getElementById("addBuildingBtn").addEventListener("click", () => openForm("buildings"));
+  document.getElementById("addPeriodBtn").addEventListener("click", () => openForm("periods"));
+  document.getElementById("addLeaveBtn").addEventListener("click", () => openForm("leaves"));
+  document.getElementById("shiftFormCancel").addEventListener("click", () => form.classList.remove("active"));
+  document.getElementById("closeSettings").addEventListener("click", () => modal.classList.remove("active"));
+  form.addEventListener("click", e => { if (e.target === form) form.classList.remove("active"); });
+  modal.addEventListener("click", e => { if (e.target === modal) modal.classList.remove("active"); });
 }
 
 // ===== Summary modal =====
@@ -752,7 +752,7 @@ function setupSendToGoogle(calendar) {
       // Request OAuth directly from the click to avoid popup blockers on mobile.
       const token = await googleAuth.getToken();
       const remote = await listCalendarEvents(token, startDate, endDate);
-      const presets = [...Object.values(SHIFT_MAP), ...shifts.map(s => s.preset).filter(Boolean)];
+      const presets = [...getKnownPresets(), ...shifts.map(s => s.preset).filter(Boolean)];
       const occupied = new Set(remote.filter(ev => isShiftEvent(ev, presets)).map(googleEventDate));
       for (let i = 0; i < shifts.length; i++) {
         const shift = shifts[i];
