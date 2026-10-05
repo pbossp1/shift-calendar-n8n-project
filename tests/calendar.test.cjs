@@ -331,5 +331,51 @@ test('all-day standby can be edited without a time or building and Google Cath i
   const cal=calendar();h.context.cal=cal;h.run("createShiftPicker(cal).open('2026-10-05')");
   h.el('shiftBtns').children.find(b=>b.textContent==='Cath').emit();h.el('confirmBtn').emit();
   h.run('setupSendToGoogle(cal)');await h.el('sendToGoogleBtn').emit();
-  assert.equal(posts,0);assert.match(h.el('sendStatus').textContent,/ข้ามวันที่มีเวรแล้ว 1/);
+  assert.equal(posts,0);assert.match(h.el('sendStatus').textContent,/ข้ามรายการที่มีแล้ว 1/);
+});
+
+test('8C and Cath coexist in either order; duplicate Cath and a second regular shift are blocked', () => {
+  for (const order of [['8','Cath'],['Cath','8']]) {
+    const h=harness(),cal=calendar();h.context.cal=cal;
+    h.run('const pairPicker=createShiftPicker(cal)');
+    const add=code=>{
+      h.run("pairPicker.open('2026-10-05')");
+      if(code!=='Cath')h.el('buildingBtns').children.find(b=>b.textContent==='C').emit();
+      h.el('shiftBtns').children.find(b=>b.textContent===code).emit();h.el('confirmBtn').emit();
+    };
+    order.forEach(add);assert.deepEqual(cal.getEvents().map(ev=>ev.title).sort(),['8C','Cath']);
+    add('Cath');add('12');assert.equal(cal.getEvents().length,2);assert.equal(h.alerts.length,2);
+    const reloaded=calendar();h.context.reloaded=reloaded;h.run('loadEvents(reloaded)');
+    assert.deepEqual(reloaded.getEvents().map(ev=>ev.title).sort(),['8C','Cath']);
+  }
+});
+
+test('Google independently fills the missing regular/Cath slot and repeating send adds neither again', async () => {
+  for (const initial of [[],['regular'],['cath'],['regular','cath']]) {
+    const remote=initial.map(kind=>kind==='regular'?legacy('2026-10-05'):{summary:'CATH',start:{date:'2026-10-05'},end:{date:'2026-10-06'}});
+    const posts=[];
+    const h=harness({fetch:async(_,options)=>{
+      if(options.method!=='POST')return response(200,{items:remote});
+      const body=JSON.parse(options.body);posts.push(body);remote.push(body);return response(200,body);
+    }});
+    const cath={title:'Cath',start:'2026-10-05',allDay:true,extendedProps:{code:'Cath',preset:{type:'standby',label:'Cath',displayCode:'Cath',colorId:'3'}}};
+    h.context.cal=calendar([local('2026-10-05'),cath]);h.run('setupSendToGoogle(cal)');
+    await h.el('sendToGoogleBtn').emit();assert.equal(posts.length,2-initial.length);
+    assert.equal(new Set(posts.map(p=>p.id)).size,posts.length);
+    for(const body of posts){assert.equal(body.extendedProperties.private.shiftKind,body.summary==='Cath'?'standby':'work');}
+    await h.el('sendToGoogleBtn').emit();assert.equal(posts.length,2-initial.length);
+  }
+});
+
+test('old Cath using a shared daily ID is preserved while regular shift uses the next ID', async () => {
+  const oldCath={id:'shift20261005',summary:'Cath',start:{date:'2026-10-05'},description:'สแตนบายทั้งวัน 1 วัน',extendedProperties:{private:{source:'shift-calendar'}}};
+  const ids=[];
+  const h=harness({fetch:async(url,options)=>{
+    if(options.method!=='POST')return response(200,oldCath);
+    const body=JSON.parse(options.body);ids.push(body.id);
+    return response(body.id===oldCath.id?409:200,body);
+  }});
+  const result=await h.run("createCalendarEvent('token',{date:'2026-10-05',code:'7C'})");
+  assert.equal(result.created,true);assert.deepEqual(ids,['shift20261005','shift20261005r1']);
+  assert.equal(result.event.extendedProperties.private.shiftKind,'work');
 });
