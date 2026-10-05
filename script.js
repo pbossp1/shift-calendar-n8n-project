@@ -423,8 +423,27 @@ function googleEventDate(event) {
   return new Date(date.getTime() + 7 * 3600000).toISOString().slice(0, 10);
 }
 
+function localShiftGroup(preset, title = "") {
+  if (preset?.type === "standby") return "standby";
+  // Recognize Cath saved as a day-off label before standalone standby existed.
+  if (preset?.type !== "work" && /^cath$/i.test((preset?.label || title).trim())) return "standby";
+  return "work";
+}
+
+function googleShiftGroup(event, presets = getKnownPresets()) {
+  const stored = event.extendedProperties?.private?.shiftKind;
+  if (stored === "work" || stored === "standby") return stored;
+  if (/^สแตนบายทั้งวัน/.test(event.description || "")) return "standby";
+  if (/^ตึก .+\nเวร /.test(event.description || "")) return "work";
+  if (/^cath$/i.test((event.summary || "").trim())) return "standby";
+  return presets.some(p => p.type === "standby" && p.label === event.summary) ? "standby" : "work";
+}
+
+function shiftSlot(date, group) { return `${date}:${group}`; }
+
 function isShiftEvent(event, presets = getKnownPresets()) {
   if (event.status === "cancelled") return false;
+  if (googleShiftGroup(event, presets) === "standby") return true;
   if (event.extendedProperties?.private?.source === "shift-calendar") return true;
   // Recognize exports made before metadata was introduced, including the old n8n titles.
   if (/^(?:\d{1,2}(?::\d{2})?)-(?:\d{1,2}(?::\d{2})?) Vic .+$/.test(event.summary || "")) return true;
@@ -434,15 +453,16 @@ function isShiftEvent(event, presets = getKnownPresets()) {
 }
 
 async function createCalendarEvent(token, shift) {
+  const group = localShiftGroup(shift.preset || SHIFT_MAP[shift.code], shift.code);
   const body = {
     ...buildEventBody(shift),
-    // A date-level ID prevents two devices creating the same day concurrently.
-    id: `shift${shift.date.replaceAll("-", "")}`,
-    extendedProperties: { private: { source: "shift-calendar", shiftDate: shift.date, presetCode: shift.code } }
+    // Keep independent, stable IDs for the regular shift and standby on each date.
+    id: `${group === "standby" ? "cath" : "shift"}${shift.date.replaceAll("-", "")}`,
+    extendedProperties: { private: { source: "shift-calendar", shiftDate: shift.date, presetCode: shift.code, shiftKind: group } }
   };
   const baseId = body.id;
   // Google reserves deleted IDs. Use the same next generation on every device,
-  // and only advance after Google confirms the old record was deleted.
+  // Advance only for a confirmed deletion or a legacy record in the other group.
   for (let generation = 0; generation < 20; generation++) {
     body.id = baseId + (generation ? `r${generation.toString(32)}` : "");
     try {
@@ -459,6 +479,9 @@ async function createCalendarEvent(token, shift) {
       if (!isShiftEvent(existing) || googleEventDate(existing) !== shift.date) {
         throw new Error("รหัสรายการเดิมชนกับรายการที่ถูกย้ายวัน กรุณาตรวจ Google Calendar ก่อนส่งอีกครั้ง");
       }
+      // Older Cath exports used shiftYYYYMMDD too. Preserve those events and
+      // allocate the next regular-shift ID instead of treating Cath as a duplicate.
+      if (googleShiftGroup(existing) !== group) continue;
       return { created: false, event: existing };
     }
   }
@@ -540,8 +563,10 @@ function createShiftPicker(calendar) {
     if (isSending) return;
     const preset = currentPreset();
     if (!preset) { alert("กรุณาเลือกตึกและเวร หรือเลือก Cath / วันลา"); return; }
-    if (calendar.getEvents().some(ev => ev.startStr.slice(0, 10) === selectedDate)) {
-      alert("วันนี้มีเวรในตารางแล้ว หากต้องการเปลี่ยน ให้ลบเวรเดิมในเว็บก่อน");
+    const group = localShiftGroup(preset);
+    if (calendar.getEvents().some(ev => ev.startStr.slice(0, 10) === selectedDate &&
+      localShiftGroup(eventConfig(ev), ev.title) === group)) {
+      alert(group === "standby" ? "วันนี้มี Cath / สแตนบายแล้ว" : "วันนี้มีเวรปกติหรือวันลาแล้ว หากต้องการเปลี่ยน ให้ลบรายการเดิมในเว็บก่อน");
       return;
     }
     calendar.addEvent({
@@ -797,15 +822,17 @@ function setupSendToGoogle(calendar) {
       const token = await googleAuth.getToken();
       const remote = await listCalendarEvents(token, startDate, endDate);
       const presets = [...getKnownPresets(), ...shifts.map(s => s.preset).filter(Boolean)];
-      const occupied = new Set(remote.filter(ev => isShiftEvent(ev, presets)).map(googleEventDate));
+      const occupied = new Set(remote.filter(ev => isShiftEvent(ev, presets))
+        .map(ev => shiftSlot(googleEventDate(ev), googleShiftGroup(ev, presets))));
       for (let i = 0; i < shifts.length; i++) {
         const shift = shifts[i];
         btn.textContent = `กำลังส่ง... (${i + 1}/${shifts.length})`;
-        if (occupied.has(shift.date)) { skipped++; continue; }
+        const slot = shiftSlot(shift.date, localShiftGroup(shift.preset, shift.code));
+        if (occupied.has(slot)) { skipped++; continue; }
         try {
           const result = await createCalendarEvent(token, shift);
           if (result.created) added++; else skipped++;
-          occupied.add(shift.date);
+          occupied.add(slot);
         } catch (error) {
           failed++;
           errors.push(`${shift.date}: ${error.message}`);
@@ -815,7 +842,7 @@ function setupSendToGoogle(calendar) {
           }
         }
       }
-      status.textContent = `เพิ่ม ${added} เวร • ข้ามวันที่มีเวรแล้ว ${skipped} รายการ • ไม่สำเร็จ/ยังไม่ได้ส่ง ${failed} รายการ`;
+      status.textContent = `เพิ่ม ${added} เวร • ข้ามรายการที่มีแล้ว ${skipped} รายการ • ไม่สำเร็จ/ยังไม่ได้ส่ง ${failed} รายการ`;
       if (errors.length) status.textContent += `\n${errors.join("\n")}`;
     } catch (error) {
       status.textContent = `ยังไม่ได้ส่ง: ${error.message}`;
