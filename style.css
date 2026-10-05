@@ -467,3 +467,22 @@ body {
   border-color: #333;
   transform: scale(1.1);
 }
+
+/* Presets remain usable on small screens and with the on-screen keyboard. */
+.modal-content { max-height: 90dvh; overflow-y: auto; }
+.preset-options { display: grid; gap: 10px; }
+.preset-options button { display: grid; gap: 5px; text-align: left; padding: 12px; border: 2px solid #ddd; border-radius: 8px; background: white; cursor: pointer; font: inherit; overflow-wrap: anywhere; }
+.preset-options button.selected { background: #edf0ff; border-color: #667eea; }
+.preset-options small { color: #555; }
+.form-hint { font-size: 13px !important; font-weight: normal !important; color: #666; }
+.help-text { color: white; text-align: center; line-height: 1.7; font-size: 14px; }
+.send-status { white-space: pre-wrap; overflow-wrap: anywhere; background: white; color: #333; border-radius: 10px; padding: 16px; line-height: 1.7; }
+.send-status:empty { display: none; }
+#shiftFormCategory { width: 100%; padding: 10px; font: inherit; border: 2px solid #e0e0e0; border-radius: 8px; background: white; }
+.shift-info { overflow-wrap: anywhere; }
+button:disabled { opacity: .6; cursor: wait; }
+@media (max-width: 640px) {
+  .modal-content { padding: 20px; }
+  .modal-actions { flex-wrap: wrap; }
+  .summary-btn-container button { padding: 12px 20px; font-size: 14px; }
+}
