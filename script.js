@@ -8,6 +8,7 @@ const CONFIG = {
 
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 const TZ = "+07:00";
+const TIME_ZONE = "Asia/Bangkok";
 
 const DEFAULT_SHIFT_MAP = {
   "7N":  { type: "work", hours: 8,  start: "07:00", end: "15:00", overnight: false, building: "N", colorId: "2" },
@@ -236,8 +237,8 @@ function buildEventBody(shift) {
     const endDate = config.overnight ? addDaysISO(startDate, 1) : startDate;
     return {
       summary: buildSummary(config),
-      start: { dateTime: `${startDate}T${config.start}:00${TZ}` },
-      end:   { dateTime: `${endDate}T${config.end}:00${TZ}` },
+      start: { dateTime: `${startDate}T${config.start}:00${TZ}`, timeZone: TIME_ZONE },
+      end:   { dateTime: `${endDate}T${config.end}:00${TZ}`, timeZone: TIME_ZONE },
       colorId: config.colorId,
       description: `ตึก ${config.building}\nเวร ${config.hours} ชม\n${CATEGORY_LABELS[config.category] || "เวรประจำ"}`
     };
@@ -314,7 +315,7 @@ async function listCalendarEvents(token, startDate, endDate) {
     const query = new URLSearchParams({
       timeMin: `${startDate}T00:00:00${TZ}`,
       timeMax: `${endDate}T00:00:00${TZ}`,
-      singleEvents: "true", showDeleted: "false", timeZone: "Asia/Bangkok", maxResults: "2500"
+      singleEvents: "true", showDeleted: "false", timeZone: TIME_ZONE, maxResults: "2500"
     });
     if (pageToken) query.set("pageToken", pageToken);
     const page = await calendarRequest(token, `?${query}`);
