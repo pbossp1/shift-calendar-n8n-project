@@ -100,30 +100,47 @@ test('migrates untouched legacy presets and snapshots without changing custom ti
   assert.equal(h.run("SHIFT_MAP['7N'].end"), '15:00');
   assert.equal(h.run("SHIFT_MAP['7C'].start"), '08:00');
   assert.equal(cal.getEvents()[0].extendedProps.preset.hours, 8);
-  h.run("delete SHIFT_MAP['7N']; resetShiftMap(); SHIFT_MAP['7N'].end='18:00'");
+  h.run("delete SHIFT_MAP['7N']; SHIFT_MAP['7N']=structuredClone(DEFAULT_SHIFT_MAP['7N']); SHIFT_MAP['7N'].end='18:00'");
   assert.equal(cal.getEvents()[0].extendedProps.preset.end, '15:00');
   assert.equal(JSON.parse(h.storage.get('shift-calendar-events'))[0].extendedProps.preset.end, '15:00');
 });
 
-test('preset form rejects invalid times and supports arbitrary named on-call presets', () => {
-  const h = harness(); h.run('createShiftSettings()'); h.el('addShiftBtn').emit();
-  h.el('shiftFormCode').value = 'NIGHT';
-  h.el('shiftFormLabel').value = 'On-call โรงพยาบาล A';
-  h.el('shiftFormCategory').value = 'oncall';
-  h.el('shiftFormStart').value = '22:00'; h.el('shiftFormEnd').value = '06:30';
-  h.el('shiftFormBuilding').value = 'โรงพยาบาล A';
-  h.el('shiftFormSave').emit();
-  assert.equal(h.run('SHIFT_MAP.NIGHT'), undefined);
-  assert.match(h.alerts.at(-1), /เวลาเลิก/);
-  h.el('shiftFormOvernight').checked = true; h.el('shiftFormSave').emit();
-  assert.equal(h.run('SHIFT_MAP.NIGHT.hours'), 8.5);
-  const cal = calendar(); h.context.cal = cal; h.run("createShiftPicker(cal).open('2026-10-05')");
-  h.el('shiftBtns').children.find(b => b.dataset.code === 'NIGHT').emit(); h.el('confirmBtn').emit();
-  assert.equal(cal.getEvents()[0].extendedProps.code, 'NIGHT');
-  h.el('confirmBtn').emit(); assert.equal(cal.getEvents().length, 1);
-  h.run('delete SHIFT_MAP.NIGHT');
-  h.context.preset = cal.getEvents()[0].extendedProps.preset;
-  assert.equal(h.run("buildEventBody({date:'2026-10-05',code:'NIGHT',preset}).end.dateTime"), '2026-10-06T06:30:00+07:00');
+test('building/time picker restores N/C and 8/12/24 buttons with compact titles', () => {
+  const h = harness(), cal = calendar(); h.context.cal = cal;
+  h.run("const picker = createShiftPicker(cal); picker.open('2026-10-05')");
+  assert.deepEqual(h.el('buildingBtns').children.map(b=>b.textContent), ['N','C']);
+  assert.deepEqual(h.el('shiftBtns').children.map(b=>b.textContent), ['8','12','24','PL','VL']);
+  h.el('buildingBtns').children.find(b=>b.textContent==='N').emit();
+  h.el('shiftBtns').children.find(b=>b.textContent==='8').emit();h.el('confirmBtn').emit();
+  assert.equal(cal.getEvents()[0].title, '8N');
+  assert.equal(cal.getEvents()[0].backgroundColor,'#33B679');
+  h.run("picker.open('2026-10-06')");
+  h.el('shiftBtns').children.find(b=>b.textContent==='12').emit();
+  h.el('buildingBtns').children.find(b=>b.textContent==='C').emit();h.el('confirmBtn').emit();
+  assert.equal(cal.getEvents()[1].title,'12C');
+  assert.equal(cal.getEvents()[1].backgroundColor,'#D50000');
+  h.run("picker.open('2026-10-07')");h.el('shiftBtns').children.find(b=>b.textContent==='PL').emit();h.el('confirmBtn').emit();
+  assert.equal(cal.getEvents()[2].title,'PL');
+});
+
+test('add building once, add on-call time once, then combine them without creating presets per building', () => {
+  const h=harness();h.run('createShiftSettings()');h.el('addBuildingBtn').emit();
+  h.el('optionCode').value='PT';h.el('optionName').value='คลินิก A';h.el('shiftFormSave').emit();
+  h.el('addPeriodBtn').emit();h.el('optionCode').value='OC';h.el('optionName').value='On-call';
+  h.el('shiftFormStart').value='22:00';h.el('shiftFormEnd').value='06:30';h.el('shiftFormSave').emit();
+  assert.equal(h.run("OPTIONS.periods.some(p=>p.code==='OC')"),false);assert.match(h.alerts.at(-1),/เวลาเลิก/);
+  h.el('shiftFormOvernight').checked=true;h.el('shiftFormSave').emit();
+  assert.equal(h.run("OPTIONS.periods.find(p=>p.code==='OC').hours"),8.5);
+  const cal=calendar();h.context.cal=cal;h.run("createShiftPicker(cal).open('2026-10-05')");
+  h.el('buildingBtns').children.find(b=>b.textContent==='PT').emit();
+  h.el('shiftBtns').children.find(b=>b.textContent==='OC').emit();h.el('confirmBtn').emit();
+  const ev=cal.getEvents()[0];assert.equal(ev.title,'OCPT');assert.equal(ev.extendedProps.preset.place,'คลินิก A');
+  h.context.preset=ev.extendedProps.preset;
+  assert.equal(h.run("buildEventBody({date:'2026-10-05',preset}).end.dateTime"),'2026-10-06T06:30:00+07:00');
+  h.el('confirmBtn').emit();assert.equal(cal.getEvents().length,1);
+  const next=harness({saved:Object.fromEntries(h.storage)});
+  assert.equal(next.run("OPTIONS.buildings.some(b=>b.code==='PT')"),true);
+  assert.equal(next.run("OPTIONS.periods.some(p=>p.code==='OC')"),true);
 });
 
 test('time validation catches zero length and >24h but calculates partial hours', () => {
@@ -239,22 +256,34 @@ test('malformed or incomplete Google listing never permits an insert', async () 
   }
 });
 
-test('editing and deleting a preset through its buttons preserves scheduled snapshots', () => {
+test('editing and deleting buildings/time slots preserves scheduled snapshots and compact labels', () => {
   const h=harness();h.run('createShiftSettings()');h.el('settingsBtn').emit();
   const cal=calendar();h.context.cal=cal;h.run("createShiftPicker(cal).open('2026-10-05')");
-  h.el('shiftBtns').children.find(b=>b.dataset.code==='7N').emit();h.el('confirmBtn').emit();
-  const findRow=label=>h.el('shiftList').children.find(li=>li.children[1].children[0].textContent===label);
-  findRow('07:00-15:00 Vic N').children[2].children[0].emit();
-  h.el('shiftFormLabel').value='พาร์ทไทม์ คลินิก B';h.el('shiftFormCategory').value='parttime';
-  h.el('shiftFormStart').value='09:00';h.el('shiftFormEnd').value='17:00';h.el('shiftFormSave').emit();
-  assert.equal(h.run("SHIFT_MAP['7N'].label"),'พาร์ทไทม์ คลินิก B');
-  assert.equal(cal.getEvents()[0].extendedProps.preset.start,'07:00');
-  findRow('พาร์ทไทม์ คลินิก B').children[2].children[1].emit();
-  assert.equal(h.run("SHIFT_MAP['7N']"),undefined);
+  h.el('buildingBtns').children.find(b=>b.textContent==='N').emit();
+  h.el('shiftBtns').children.find(b=>b.textContent==='8').emit();h.el('confirmBtn').emit();
+  const row=(id,code)=>h.el(id).children.find(li=>li.children[0].children[0].textContent===code);
+  row('periodList','8').children[1].children[0].emit();
+  h.el('optionCode').value='9';h.el('shiftFormStart').value='09:00';h.el('shiftFormEnd').value='18:00';h.el('shiftFormSave').emit();
+  assert.equal(h.run("OPTIONS.periods.find(p=>p.code==='9').start"),'09:00');
+  row('buildingList','N').children[1].children[0].emit();h.el('optionCode').value='PT';h.el('shiftFormSave').emit();
+  row('periodList','9').children[1].children[1].emit();row('buildingList','PT').children[1].children[1].emit();
+  assert.equal(h.run("OPTIONS.buildings.some(b=>b.code==='PT')"),false);
+  assert.equal(cal.getEvents()[0].title,'8N');
   h.context.saved=cal.getEvents()[0];
-  assert.equal(h.run("buildEventBody({date:saved.startStr,code:saved.extendedProps.code,preset:saved.extendedProps.preset}).end.dateTime"),'2026-10-05T15:00:00+07:00');
+  assert.equal(h.run("buildEventBody({date:saved.startStr,preset:saved.extendedProps.preset}).end.dateTime"),'2026-10-05T15:00:00+07:00');
   const restored=calendar();h.context.restored=restored;h.run('loadEvents(restored)');
+  assert.equal(restored.getEvents()[0].title,'8N');
   assert.equal(restored.getEvents()[0].extendedProps.preset.start,'07:00');
+});
+
+test('existing events from both old UIs get compact labels without losing data', () => {
+  const h=harness({saved:{'shift-calendar-events':JSON.stringify([
+    local('2026-10-05'),
+    {title:'07:00-19:00 Vic C',start:'2026-10-06',allDay:true,extendedProps:{code:'12C',preset:{type:'work',hours:12,start:'07:00',end:'19:00',overnight:false,building:'C',colorId:'11'}}}
+  ])}});
+  const cal=calendar();h.context.cal=cal;h.run('loadEvents(cal)');
+  assert.deepEqual(cal.getEvents().map(ev=>ev.title),['8N','12C']);
+  assert.equal(cal.getEvents()[1].extendedProps.preset.end,'19:00');
 });
 
 test('markup contains every static JS element id exactly once', () => {

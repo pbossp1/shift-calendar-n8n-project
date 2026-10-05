@@ -2,6 +2,10 @@
   box-sizing: border-box;
 }
 
+button {
+  font-family: inherit;
+}
+
 body {
   margin: 0;
   padding: 20px;
@@ -470,15 +474,10 @@ body {
 
 /* Presets remain usable on small screens and with the on-screen keyboard. */
 .modal-content { max-height: 90dvh; overflow-y: auto; }
-.preset-options { display: grid; gap: 10px; }
-.preset-options button { display: grid; gap: 5px; text-align: left; padding: 12px; border: 2px solid #ddd; border-radius: 8px; background: white; cursor: pointer; font: inherit; overflow-wrap: anywhere; }
-.preset-options button.selected { background: #edf0ff; border-color: #667eea; }
-.preset-options small { color: #555; }
 .form-hint { font-size: 13px !important; font-weight: normal !important; color: #666; }
 .help-text { color: white; text-align: center; line-height: 1.7; font-size: 14px; }
 .send-status { white-space: pre-wrap; overflow-wrap: anywhere; background: white; color: #333; border-radius: 10px; padding: 16px; line-height: 1.7; }
 .send-status:empty { display: none; }
-#shiftFormCategory { width: 100%; padding: 10px; font: inherit; border: 2px solid #e0e0e0; border-radius: 8px; background: white; }
 .shift-info { overflow-wrap: anywhere; }
 button:disabled { opacity: .6; cursor: wait; }
 @media (max-width: 640px) {
@@ -486,3 +485,11 @@ button:disabled { opacity: .6; cursor: wait; }
   .modal-actions { flex-wrap: wrap; }
   .summary-btn-container button { padding: 12px 20px; font-size: 14px; }
 }
+
+.settings-section { margin: 20px 0; }
+.settings-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.settings-heading h4 { margin: 0; color: #444; }
+.settings-heading button { border: 1px solid #667eea; border-radius: 7px; padding: 8px 12px; color: #5568d3; background: white; cursor: pointer; font: inherit; font-size: 14px; }
+.options-list { list-style: none; margin: 10px 0 0; padding: 0; }
+#shiftSelectionDetail { min-height: 38px; line-height: 1.5; }
+#shiftModal .btn-group button { padding: 12px 14px; }
