@@ -69,8 +69,8 @@ function buildSummary(config) {
 }
 
 function validatePreset(config) {
-  if (config.type === "leave") {
-    if (!config.label?.trim()) throw new Error("กรุณาใส่ชื่อวันลา");
+  if (config.type === "leave" || config.type === "standby") {
+    if (!config.label?.trim()) throw new Error("กรุณาใส่ชื่อรายการ");
     return;
   }
   if (config.type !== "work") throw new Error("ประเภทพรีเซ็ทไม่ถูกต้อง");
@@ -143,6 +143,24 @@ function loadOptions() {
 let OPTIONS = loadOptions();
 function saveOptions() { localStorage.setItem(CONFIG.optionsStorageKey, JSON.stringify(OPTIONS)); }
 
+// Seed once for existing installations too. A later user deletion stays deleted.
+if (!OPTIONS.cathStandbyAdded) {
+  let cath = OPTIONS.periods.find(p => p.code.toLowerCase() === "cath");
+  if (!cath) {
+    const oldLeave = OPTIONS.leaves.find(l => l.code.toLowerCase() === "cath");
+    cath = { ...oldLeave, id: oldLeave?.id || crypto.randomUUID(), code: "Cath", colorId: oldLeave?.colorId || "3" };
+    OPTIONS.periods.push(cath);
+    if (oldLeave) OPTIONS.leaves = OPTIONS.leaves.filter(l => l.id !== oldLeave.id);
+  }
+  Object.assign(cath, { code: "Cath", name: "On-call สแตนบาย", allDay: true, category: "oncall" });
+  OPTIONS.cathStandbyAdded = true;
+  saveOptions();
+}
+
+function makeStandbyPreset(period) {
+  return { type: "standby", label: period.code, displayCode: period.code, colorId: period.colorId || "3" };
+}
+
 function makeWorkPreset(building, period) {
   const config = {
     type: "work", building: building.code, place: building.name || building.code,
@@ -156,7 +174,7 @@ function makeWorkPreset(building, period) {
 
 function compactTitle(config) {
   if (config.displayCode) return config.displayCode;
-  if (config.type === "leave") return config.label;
+  if (config.type === "leave" || config.type === "standby") return config.label;
   const building = OPTIONS.buildings.find(b => b.legacyName === config.building || b.code === config.building);
   const period = OPTIONS.periods.find(p => p.start === config.start && p.end === config.end &&
     p.overnight === !!config.overnight && p.name === legacyPeriodName(config) && p.category === (config.category || "regular"));
@@ -165,7 +183,8 @@ function compactTitle(config) {
 
 function getKnownPresets() {
   return [...Object.values(SHIFT_MAP),
-    ...OPTIONS.buildings.flatMap(b => OPTIONS.periods.map(p => makeWorkPreset(b, p))),
+    ...OPTIONS.buildings.flatMap(b => OPTIONS.periods.filter(p => !p.allDay).map(p => makeWorkPreset(b, p))),
+    ...OPTIONS.periods.filter(p => p.allDay).map(makeStandbyPreset),
     ...OPTIONS.leaves.map(l => ({ type: "leave", label: l.code, colorId: l.colorId }))];
 }
 
@@ -319,7 +338,7 @@ function buildEventBody(shift) {
     start: { date: startDate },
     end:   { date: endDate },
     colorId: config.colorId,
-    description: `วันหยุด ${days} วัน`
+    description: config.type === "standby" ? `สแตนบายทั้งวัน ${days} วัน` : `วันหยุด ${days} วัน`
   };
 }
 
@@ -459,6 +478,7 @@ function createShiftPicker(calendar) {
     if (leave) return { type: "leave", label: leave.code, displayCode: leave.code, colorId: leave.colorId };
     const building = OPTIONS.buildings.find(b => b.id === buildingId);
     const period = OPTIONS.periods.find(p => p.id === periodId);
+    if (period?.allDay) return makeStandbyPreset(period);
     return building && period ? makeWorkPreset(building, period) : null;
   }
 
@@ -467,7 +487,7 @@ function createShiftPicker(calendar) {
     shiftBtns.querySelectorAll("button").forEach(b => b.classList.toggle("selected",
       (periodId && b.dataset.periodId === periodId) || (leaveId && b.dataset.leaveId === leaveId)));
     const preset = currentPreset();
-    detail.textContent = !preset ? "เลือกตึกและเวร หรือเลือกวันลา" : preset.type === "leave" ? preset.label
+    detail.textContent = !preset ? "เลือกตึกและเวร หรือเลือก Cath / วันลา" : preset.type === "standby" ? `${preset.label} · สแตนบายทั้งวัน` : preset.type === "leave" ? preset.label
       : `${preset.displayCode} · ${preset.start}–${preset.end}${preset.overnight ? " (วันถัดไป)" : ""}${preset.place !== preset.building ? ` · ${preset.place}` : ""}`;
   }
 
@@ -483,14 +503,23 @@ function createShiftPicker(calendar) {
       const btn = document.createElement("button");
       btn.type = "button"; btn.textContent = building.code; btn.title = building.name || building.code;
       btn.dataset.buildingId = building.id;
-      btn.addEventListener("click", () => { buildingId = building.id; leaveId = null; updateSelection(); });
+      btn.addEventListener("click", () => {
+        buildingId = building.id; leaveId = null;
+        if (OPTIONS.periods.find(p => p.id === periodId)?.allDay) periodId = null;
+        updateSelection();
+      });
       buildingBtns.appendChild(btn);
     });
     OPTIONS.periods.forEach(period => {
       const btn = document.createElement("button");
       btn.type = "button"; btn.textContent = period.code; btn.dataset.periodId = period.id;
-      btn.title = `${period.name || period.code} · ${period.start}–${period.end}${period.overnight ? " (วันถัดไป)" : ""}`;
-      btn.addEventListener("click", () => { periodId = period.id; leaveId = null; updateSelection(); });
+      btn.title = period.allDay ? `${period.code} · สแตนบายทั้งวัน ไม่ต้องเลือกตึก`
+        : `${period.name || period.code} · ${period.start}–${period.end}${period.overnight ? " (วันถัดไป)" : ""}`;
+      btn.addEventListener("click", () => {
+        periodId = period.id; leaveId = null;
+        if (period.allDay) buildingId = null;
+        updateSelection();
+      });
       shiftBtns.appendChild(btn);
     });
     OPTIONS.leaves.forEach(leave => {
@@ -510,7 +539,7 @@ function createShiftPicker(calendar) {
   document.getElementById("confirmBtn").addEventListener("click", () => {
     if (isSending) return;
     const preset = currentPreset();
-    if (!preset) { alert("กรุณาเลือกตึกและเวร หรือเลือกวันลา"); return; }
+    if (!preset) { alert("กรุณาเลือกตึกและเวร หรือเลือก Cath / วันลา"); return; }
     if (calendar.getEvents().some(ev => ev.startStr.slice(0, 10) === selectedDate)) {
       alert("วันนี้มีเวรในตารางแล้ว หากต้องการเปลี่ยน ให้ลบเวรเดิมในเว็บก่อน");
       return;
@@ -537,6 +566,8 @@ function createShiftSettings() {
   const endInput = document.getElementById("shiftFormEnd");
   const overnightInput = document.getElementById("shiftFormOvernight");
   const workFields = document.getElementById("workFields");
+  const allDayInput = document.getElementById("shiftFormAllDay");
+  const timeFields = document.getElementById("timeFields");
   const colorFields = document.getElementById("colorFields");
   const colorPicker = document.getElementById("shiftFormColor");
   const duration = document.getElementById("shiftDuration");
@@ -549,13 +580,18 @@ function createShiftSettings() {
 
   function updateDuration() {
     if (kind !== "periods") return;
+    timeFields.style.display = allDayInput.checked ? "none" : "";
+    if (allDayInput.checked) {
+      duration.textContent = "แสดงเป็นรายการทั้งวันใน Google Calendar ไม่ต้องเลือกตึก";
+      return;
+    }
     const config = { type: "work", building: "N", start: startInput.value, end: endInput.value, overnight: overnightInput.checked };
     try {
       validatePreset(config);
       duration.textContent = `${config.hours} ชั่วโมง · ตัวอย่างในตาราง: ${codeInput.value.trim() || config.hours}N`;
     } catch { duration.textContent = "เวรข้ามคืนให้เลือก ‘เลิกวันถัดไป’"; }
   }
-  [codeInput, startInput, endInput, overnightInput].forEach(el => el.addEventListener("input", updateDuration));
+  [codeInput, startInput, endInput, overnightInput, allDayInput].forEach(el => el.addEventListener("input", updateDuration));
 
   function renderColors() {
     colorPicker.innerHTML = "";
@@ -583,6 +619,7 @@ function createShiftSettings() {
     startInput.value = item?.start || "07:00";
     endInput.value = item?.end || "15:00";
     overnightInput.checked = !!item?.overnight;
+    allDayInput.checked = !!item?.allDay;
     selectedColorId = item?.colorId || (group === "leaves" ? "8" : "1");
     workFields.style.display = group === "periods" ? "" : "none";
     colorFields.style.display = group === "buildings" ? "none" : "";
@@ -598,7 +635,8 @@ function createShiftSettings() {
         const info = document.createElement("div"); info.className = "shift-info";
         const name = document.createElement("strong"); name.textContent = item.code;
         const detail = document.createElement("small");
-        detail.textContent = group === "periods" ? `${item.start}–${item.end}${item.overnight ? " (+1 วัน)" : ""}${item.name ? ` · ${item.name}` : ""}` : item.name;
+        detail.textContent = group === "periods" ? (item.allDay ? "สแตนบายทั้งวัน · ไม่แยกตึก"
+          : `${item.start}–${item.end}${item.overnight ? " (+1 วัน)" : ""}${item.name ? ` · ${item.name}` : ""}`) : item.name;
         info.append(name, detail);
         const actions = document.createElement("div"); actions.className = "shift-actions";
         const edit = document.createElement("button"); edit.textContent = "แก้ไข";
@@ -628,10 +666,16 @@ function createShiftSettings() {
     const item = { ...previous, id: editingId || crypto.randomUUID(), code, name: nameInput.value.trim() };
     if (kind !== "buildings") item.colorId = selectedColorId;
     if (kind === "periods") {
-      const config = { type: "work", building: "N", start: startInput.value, end: endInput.value, overnight: overnightInput.checked };
-      try { validatePreset(config); } catch (error) { alert(error.message); return; }
-      Object.assign(item, { start: config.start, end: config.end, overnight: config.overnight, hours: config.hours,
-        category: code.toUpperCase() === "OC" ? "oncall" : previous?.category || "regular" });
+      item.allDay = allDayInput.checked;
+      if (item.allDay) {
+        delete item.start; delete item.end; delete item.overnight; delete item.hours;
+        item.category = "oncall";
+      } else {
+        const config = { type: "work", building: "N", start: startInput.value, end: endInput.value, overnight: overnightInput.checked };
+        try { validatePreset(config); } catch (error) { alert(error.message); return; }
+        Object.assign(item, { start: config.start, end: config.end, overnight: config.overnight, hours: config.hours,
+          category: code.toUpperCase() === "OC" ? "oncall" : previous?.category || "regular" });
+      }
       if (previous && previous.colorId !== item.colorId) {
         OPTIONS.buildings.forEach(b => delete OPTIONS.colors[`${b.id}:${item.id}`]);
       }

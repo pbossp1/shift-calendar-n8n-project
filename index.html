@@ -84,11 +84,14 @@
       <p><label for="optionName">ชื่อเต็ม (ไม่บังคับ)</label></p>
       <input id="optionName" type="text" maxlength="80" />
       <div id="workFields">
-        <p><label for="shiftFormStart">เวลาเริ่ม</label></p>
-        <input id="shiftFormStart" type="time" />
-        <p><label for="shiftFormEnd">เวลาเลิก</label></p>
-        <input id="shiftFormEnd" type="time" />
-        <p><label><input id="shiftFormOvernight" type="checkbox" /> เลิกวันถัดไป</label></p>
+        <p><label><input id="shiftFormAllDay" type="checkbox" /> สแตนบายทั้งวัน (ไม่แยกตึก)</label></p>
+        <div id="timeFields">
+          <p><label for="shiftFormStart">เวลาเริ่ม</label></p>
+          <input id="shiftFormStart" type="time" />
+          <p><label for="shiftFormEnd">เวลาเลิก</label></p>
+          <input id="shiftFormEnd" type="time" />
+          <p><label><input id="shiftFormOvernight" type="checkbox" /> เลิกวันถัดไป</label></p>
+        </div>
         <p id="shiftDuration" class="form-hint" aria-live="polite"></p>
       </div>
       <div id="colorFields">

@@ -109,7 +109,7 @@ test('building/time picker restores N/C and 8/12/24 buttons with compact titles'
   const h = harness(), cal = calendar(); h.context.cal = cal;
   h.run("const picker = createShiftPicker(cal); picker.open('2026-10-05')");
   assert.deepEqual(h.el('buildingBtns').children.map(b=>b.textContent), ['N','C']);
-  assert.deepEqual(h.el('shiftBtns').children.map(b=>b.textContent), ['8','12','24','PL','VL']);
+  assert.deepEqual(h.el('shiftBtns').children.map(b=>b.textContent), ['8','12','24','Cath','PL','VL']);
   h.el('buildingBtns').children.find(b=>b.textContent==='N').emit();
   h.el('shiftBtns').children.find(b=>b.textContent==='8').emit();h.el('confirmBtn').emit();
   assert.equal(cal.getEvents()[0].title, '8N');
@@ -291,4 +291,45 @@ test('markup contains every static JS element id exactly once', () => {
   const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
   assert.equal(new Set(ids).size,ids.length);
   for(const [,id] of source.matchAll(/getElementById\("([^"]+)"\)/g))assert(ids.includes(id),`missing ${id}`);
+});
+
+test('Cath is a building-free standby and exports as a true all-day event', () => {
+  const h=harness(),cal=calendar();h.context.cal=cal;
+  h.run("createShiftPicker(cal).open('2026-12-31')");
+  h.el('buildingBtns').children.find(b=>b.textContent==='N').emit();
+  h.el('shiftBtns').children.find(b=>b.textContent==='Cath').emit();
+  assert(h.el('buildingBtns').children.every(b=>!b.classes.has('selected')));
+  h.el('confirmBtn').emit();
+  const event=cal.getEvents()[0];assert.equal(event.title,'Cath');assert.equal(event.extendedProps.preset.type,'standby');
+  assert.equal(event.extendedProps.preset.building,undefined);
+  h.context.preset=event.extendedProps.preset;
+  const body=h.run("buildEventBody({date:'2026-12-31',preset})");
+  assert.equal(body.summary,'Cath');assert.equal(body.start.date,'2026-12-31');assert.equal(body.end.date,'2027-01-01');
+  assert.equal(body.start.dateTime,undefined);assert.equal(body.end.dateTime,undefined);assert.match(body.description,/สแตนบาย/);
+});
+
+test('Cath upgrade preserves saved options and runs only once, including after user deletion', () => {
+  const fresh=harness();
+  const old=JSON.parse(fresh.storage.get('shift-calendar-options-v1'));
+  delete old.cathStandbyAdded;old.periods=old.periods.filter(p=>p.code!=='Cath');
+  old.buildings.push({id:'custom-building',code:'PT',name:'คลินิก A'});
+  const h=harness({saved:{'shift-calendar-options-v1':JSON.stringify(old)}});
+  assert.equal(h.run("OPTIONS.periods.filter(p=>p.code==='Cath').length"),1);
+  assert.equal(h.run("OPTIONS.buildings.find(b=>b.id==='custom-building').name"),'คลินิก A');
+  h.run("OPTIONS.periods=OPTIONS.periods.filter(p=>p.code!=='Cath');saveOptions()");
+  const reloaded=harness({saved:Object.fromEntries(h.storage)});
+  assert.equal(reloaded.run("OPTIONS.periods.some(p=>p.code==='Cath')"),false);
+});
+
+test('all-day standby can be edited without a time or building and Google Cath is skipped', async () => {
+  let posts=0;
+  const h=harness({fetch:async(_,options)=>{if(options.method==='POST')posts++;return response(200,{items:[{summary:'Cath',start:{date:'2026-10-05'},end:{date:'2026-10-06'}}]})}});
+  h.run('createShiftSettings()');h.el('settingsBtn').emit();
+  const row=h.el('periodList').children.find(li=>li.children[0].children[0].textContent==='Cath');
+  row.children[1].children[0].emit();assert.equal(h.el('shiftFormAllDay').checked,true);assert.equal(h.el('timeFields').style.display,'none');
+  h.el('shiftFormStart').value='';h.el('shiftFormEnd').value='';h.el('shiftFormSave').emit();assert.deepEqual(h.alerts,[]);
+  const cal=calendar();h.context.cal=cal;h.run("createShiftPicker(cal).open('2026-10-05')");
+  h.el('shiftBtns').children.find(b=>b.textContent==='Cath').emit();h.el('confirmBtn').emit();
+  h.run('setupSendToGoogle(cal)');await h.el('sendToGoogleBtn').emit();
+  assert.equal(posts,0);assert.match(h.el('sendStatus').textContent,/ข้ามวันที่มีเวรแล้ว 1/);
 });
