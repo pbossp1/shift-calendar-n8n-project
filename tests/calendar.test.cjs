@@ -80,9 +80,13 @@ test('morning presets, edited times, overnight month-end and leave use actual ti
   const h = harness();
   const body = h.run("buildEventBody({date:'2026-10-05',code:'7N'})");
   assert.equal(body.summary, '07:00-15:00 Vic N');
+  assert.equal(body.start.timeZone, 'Asia/Bangkok');
+  assert.equal(body.end.timeZone, 'Asia/Bangkok');
   assert.equal(body.end.dateTime, '2026-10-05T15:00:00+07:00');
   const night = h.run("buildEventBody({date:'2026-10-31',code:'24N'})");
   assert.equal(night.end.dateTime, '2026-11-01T07:00:00+07:00');
+  assert.equal(night.start.timeZone, 'Asia/Bangkok');
+  assert.equal(night.end.timeZone, 'Asia/Bangkok');
   assert.equal(h.run("buildEventBody({date:'2026-12-31',code:'PL'}).end.date"), '2027-01-01');
   assert.equal(h.run("buildSummary({type:'work',start:'08:30',end:'16:00',label:'คลินิก A'})"), '08:30-16:00 คลินิก A');
 });
