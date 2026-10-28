@@ -62,10 +62,21 @@ const COLOR_ID_HEX = {
 const CATEGORY_LABELS = { regular: "เวรประจำ", parttime: "พาร์ทไทม์", oncall: "On-call" };
 let isSending = false;
 
+function formatSummaryTime(time) {
+  const [hour, minute] = time.split(":");
+  return minute === "00" ? String(Number(hour)) : `${Number(hour)}:${minute}`;
+}
+
+function compactGoogleTitle(title = "") {
+  const match = title.match(/^([01]?\d|2[0-3]):([0-5]\d)-([01]?\d|2[0-3]):([0-5]\d)( .+)$/);
+  if (!match) return title;
+  return `${formatSummaryTime(`${match[1]}:${match[2]}`)}-${formatSummaryTime(`${match[3]}:${match[4]}`)}${match[5]}`;
+}
+
 function buildSummary(config) {
   if (config.type !== "work") return config.label;
   const name = config.label?.trim() || `Vic ${config.building}`;
-  return `${config.start}-${config.end} ${name}`;
+  return `${formatSummaryTime(config.start)}-${formatSummaryTime(config.end)} ${name}`;
 }
 
 function validatePreset(config) {
@@ -356,7 +367,7 @@ async function calendarRequest(token, path = "", options = {}, { maxRetries = 3 
     try {
       res = await fetch(CALENDAR_API + path, {
         ...options,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { ...options.headers, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         signal: controller.signal
       });
       const text = await res.text();
@@ -449,7 +460,24 @@ function isShiftEvent(event, presets = getKnownPresets()) {
   if (/^(?:\d{1,2}(?::\d{2})?)-(?:\d{1,2}(?::\d{2})?) Vic .+$/.test(event.summary || "")) return true;
   if (/^ตึก .+\nเวร [\d.]+ ชม(?:\n|$)/.test(event.description || "")) return true;
   if (["PL", "VL"].includes(event.summary)) return true;
-  return presets.some(c => event.summary === buildSummary(c));
+  return presets.some(c => event.summary === buildSummary(c) || compactGoogleTitle(event.summary) === buildSummary(c));
+}
+
+async function shortenCalendarTitle(token, event) {
+  if (typeof event.summary !== "string") return false;
+  const summary = compactGoogleTitle(event.summary);
+  // Only normalize generated work titles; preserve personal appointments, prefixes,
+  // Cath, leave, and any custom title that does not use the old full-time format.
+  const generated = event.extendedProperties?.private?.source === "shift-calendar" ||
+    /^ตึก .+\nเวร [\d.]+ ชม(?:\n|$)/.test(event.description || "") ||
+    /^(?:[01]?\d|2[0-3]):[0-5]\d-(?:[01]?\d|2[0-3]):[0-5]\d Vic [NC]$/.test(event.summary || "");
+  if (!event.id || event.status === "cancelled" || !generated || summary === event.summary || googleShiftGroup(event) !== "work") return false;
+  await calendarRequest(token, `/${encodeURIComponent(event.id)}`, {
+    method: "PATCH", body: JSON.stringify({ summary }),
+    headers: event.etag ? { "If-Match": event.etag } : {}
+  });
+  event.summary = summary;
+  return true;
 }
 
 async function createCalendarEvent(token, shift) {
@@ -815,7 +843,7 @@ function setupSendToGoogle(calendar) {
     btn.disabled = true;
     btn.textContent = "กำลังตรวจ Google Calendar...";
     status.textContent = "กำลังตรวจเวรที่มีอยู่ก่อนเพิ่ม";
-    let added = 0, skipped = 0, failed = 0;
+    let added = 0, renamed = 0, skipped = 0, failed = 0;
     const errors = [];
     try {
       // Request OAuth directly from the click to avoid popup blockers on mobile.
@@ -828,8 +856,17 @@ function setupSendToGoogle(calendar) {
         const shift = shifts[i];
         btn.textContent = `กำลังส่ง... (${i + 1}/${shifts.length})`;
         const slot = shiftSlot(shift.date, localShiftGroup(shift.preset, shift.code));
-        if (occupied.has(slot)) { skipped++; continue; }
         try {
+          if (occupied.has(slot)) {
+            const existing = remote.filter(ev => isShiftEvent(ev, presets) &&
+              shiftSlot(googleEventDate(ev), googleShiftGroup(ev, presets)) === slot);
+            let changed = false;
+            for (const ev of existing) {
+              if (await shortenCalendarTitle(token, ev)) { renamed++; changed = true; }
+            }
+            if (!changed) skipped++;
+            continue;
+          }
           const result = await createCalendarEvent(token, shift);
           if (result.created) added++; else skipped++;
           occupied.add(slot);
@@ -842,7 +879,7 @@ function setupSendToGoogle(calendar) {
           }
         }
       }
-      status.textContent = `เพิ่ม ${added} เวร • ข้ามรายการที่มีแล้ว ${skipped} รายการ • ไม่สำเร็จ/ยังไม่ได้ส่ง ${failed} รายการ`;
+      status.textContent = `เพิ่ม ${added} เวร • ย่อชื่อ ${renamed} รายการ • ข้ามรายการที่มีแล้ว ${skipped} รายการ • ไม่สำเร็จ/ยังไม่ได้ส่ง ${failed} รายการ`;
       if (errors.length) status.textContent += `\n${errors.join("\n")}`;
     } catch (error) {
       status.textContent = `ยังไม่ได้ส่ง: ${error.message}`;
