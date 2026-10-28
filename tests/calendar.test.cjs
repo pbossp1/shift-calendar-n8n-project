@@ -79,7 +79,7 @@ const local = date => ({ title: '7N', start: date, allDay: true });
 test('morning presets, edited times, overnight month-end and leave use actual times', () => {
   const h = harness();
   const body = h.run("buildEventBody({date:'2026-10-05',code:'7N'})");
-  assert.equal(body.summary, '07:00-15:00 Vic N');
+  assert.equal(body.summary, '7-15 Vic N');
   assert.equal(body.start.timeZone, 'Asia/Bangkok');
   assert.equal(body.end.timeZone, 'Asia/Bangkok');
   assert.equal(body.end.dateTime, '2026-10-05T15:00:00+07:00');
@@ -88,7 +88,7 @@ test('morning presets, edited times, overnight month-end and leave use actual ti
   assert.equal(night.start.timeZone, 'Asia/Bangkok');
   assert.equal(night.end.timeZone, 'Asia/Bangkok');
   assert.equal(h.run("buildEventBody({date:'2026-12-31',code:'PL'}).end.date"), '2027-01-01');
-  assert.equal(h.run("buildSummary({type:'work',start:'08:30',end:'16:00',label:'คลินิก A'})"), '08:30-16:00 คลินิก A');
+  assert.equal(h.run("buildSummary({type:'work',start:'08:30',end:'16:00',label:'คลินิก A'})"), '8:30-16 คลินิก A');
 });
 
 test('migrates untouched legacy presets and snapshots without changing custom times', () => {
@@ -378,4 +378,53 @@ test('old Cath using a shared daily ID is preserved while regular shift uses the
   const result=await h.run("createCalendarEvent('token',{date:'2026-10-05',code:'7C'})");
   assert.equal(result.created,true);assert.deepEqual(ids,['shift20261005','shift20261005r1']);
   assert.equal(result.event.extendedProperties.private.shiftKind,'work');
+});
+
+test('compact Google titles keep real minutes, overnight dates, and leave/standby names', () => {
+  const h=harness();
+  assert.equal(h.run("buildEventBody({date:'2026-11-01',code:'24C'}).summary"),'7-7 Vic C');
+  assert.equal(h.run("buildEventBody({date:'2026-11-01',code:'24C'}).end.dateTime"),'2026-11-02T07:00:00+07:00');
+  assert.equal(h.run("buildEventBody({date:'2026-11-07',code:'12C'}).summary"),'7-19 Vic C');
+  assert.equal(h.run("compactGoogleTitle('07:30-15:45 Vic N')"),'7:30-15:45 Vic N');
+  assert.equal(h.run("compactGoogleTitle('❌07:00-15:00 Vic N')"),'❌07:00-15:00 Vic N');
+  assert.equal(h.run("buildSummary({type:'standby',label:'Cath'})"),'Cath');
+  assert.equal(h.run("buildSummary({type:'leave',label:'PL'})"),'PL');
+});
+
+test('sending the same month patches only the old generated summary and never duplicates it', async () => {
+  const remote=[{id:'existing-work',etag:'"old"',...legacy('2026-10-05','07:00-15:00 Vic N'),end:{dateTime:'2026-10-05T15:00:00+07:00'},colorId:'2'},
+    {id:'personal',summary:'07:00-15:00 Dentist',start:{date:'2026-10-05'}},
+    {id:'next-day',...legacy('2026-10-06','07:00-19:00 Vic C')},
+    {id:'cath',summary:'Cath',start:{date:'2026-10-05'}}];
+  const calls=[];
+  const h=harness({fetch:async(url,options)=>{
+    calls.push({url,...options});
+    if(options.method==='PATCH'){assert.deepEqual(JSON.parse(options.body),{summary:'7-15 Vic N'});return response(200,{...remote[0],summary:'7-15 Vic N'});}
+    assert.notEqual(options.method,'POST');return response(200,{items:remote});
+  }});
+  h.context.cal=calendar([local('2026-10-05')]);h.run('setupSendToGoogle(cal)');await h.el('sendToGoogleBtn').emit();
+  assert.equal(calls.filter(c=>c.method==='PATCH').length,1);
+  assert.equal(calls.find(c=>c.method==='PATCH').headers['If-Match'],'"old"');
+  assert.equal(calls.find(c=>c.method==='PATCH').headers.Authorization,'Bearer token-1');
+  assert.match(h.el('sendStatus').textContent,/ย่อชื่อ 1/);
+  // Mock the server's saved title on the next fetch.
+  remote[0].summary='7-15 Vic N';await h.el('sendToGoogleBtn').emit();
+  assert.equal(calls.filter(c=>c.method==='PATCH').length,1);
+  assert.equal(remote[0].end.dateTime,'2026-10-05T15:00:00+07:00');assert.equal(remote[0].colorId,'2');
+});
+
+test('title shortening skips personal/custom-prefix events and fails safely on concurrent edits', async () => {
+  let patches=0,posts=0;
+  const h=harness({fetch:async(_,options)=>{
+    if(options.method==='PATCH'){patches++;return response(412,{error:{message:'Changed by user'}});}
+    if(options.method==='POST')posts++;
+    return response(200,{items:[{id:'old',etag:'"old"',...legacy('2026-10-05','07:00-15:00 Vic N')}]});
+  }});
+  for(const event of [
+    {id:'a',summary:'07:00-15:00 Dentist'},
+    {id:'b',summary:'❌07:00-15:00 Vic N',extendedProperties:{private:{source:'shift-calendar'}}},
+    {id:'c',extendedProperties:{private:{source:'shift-calendar'}}}
+  ]){h.context.event=event;assert.equal(await h.run("shortenCalendarTitle('token',event)"),false);}
+  h.context.cal=calendar([local('2026-10-05')]);h.run('setupSendToGoogle(cal)');await h.el('sendToGoogleBtn').emit();
+  assert.equal(patches,1);assert.equal(posts,0);assert.match(h.el('sendStatus').textContent,/412/);
 });
